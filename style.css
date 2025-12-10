@@ -794,14 +794,7 @@ input[type="file"]:hover::file-selector-button {
   color: var(--sys-text-secondary);
 }
 
-@media (max-width: 640px) {
-  .period-status {
-    align-items: flex-start;
-  }
-  .period-status-text {
-    text-align: left;
-  }
-}
+/* Legacy media query - now consolidated above */
 
 /* Righe alternate chiare */
 tr:nth-child(even) td {
@@ -1357,6 +1350,11 @@ tr.match-source-row td {
   color: var(--sys-text-secondary);
 }
 
+/* =========================================
+   RESPONSIVE DESIGN - MOBILE OPTIMIZATIONS
+   ========================================= */
+
+/* Tablet and smaller devices (960px and below) */
 @media (max-width: 960px) {
   body {
     padding: 10px;
@@ -1375,28 +1373,378 @@ tr.match-source-row td {
   .col-side .card {
     flex: 1 1 260px;
   }
+  
+  /* Better button spacing on tablets */
+  .actions-row {
+    gap: 8px;
+  }
+  
+  /* Stack export buttons vertically on smaller screens */
+  .export-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  /* Make tables scrollable horizontally */
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
+/* Mobile phones (640px and below) */
 @media (max-width: 640px) {
-  .topbar-main {
-    flex-direction: column;
-    align-items: flex-start;
+  /* App container adjustments */
+  .app-container {
+    padding: 10px;
+    gap: 15px;
   }
-  .topbar-right {
-    align-self: stretch;
-    justify-content: flex-start;
-  }
+  
+  /* Topbar mobile layout */
   .topbar {
     padding: 12px;
   }
+  
+  .topbar-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .topbar-right {
+    align-self: stretch;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  
+  .topbar-left {
+    width: 100%;
+  }
+  
+  /* Hide compact/wide mode buttons on mobile for simplicity */
+  .btn-topbar-icon {
+    font-size: 1rem;
+    padding: 6px 10px;
+  }
+  
+  /* Navigation tabs - better mobile experience */
+  .topbar-nav {
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  
+  .nav-tab {
+    font-size: 0.72rem;
+    padding: 6px 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  
+  /* Main content area */
   .main {
     padding: 12px;
+    gap: 12px;
   }
+  
+  /* Cards and inputs */
+  .card {
+    padding: 12px;
+  }
+  
+  .file-block {
+    gap: 6px;
+  }
+  
+  input[type="file"] {
+    font-size: 0.75rem;
+    padding: 6px;
+  }
+  
+  input[type="file"]::file-selector-button {
+    font-size: 0.7rem;
+    padding: 4px 8px;
+  }
+  
+  /* Action buttons - stack vertically */
+  .actions-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  
+  .actions-left,
+  .actions-right {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .export-group {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px;
+  }
+  
+  .btn {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+  }
+  
+  /* Filter buttons - horizontal scroll */
+  .filter-row {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    padding: 6px 0;
+  }
+  
+  .filter-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  
+  /* Summary chips - better wrapping */
+  .summary {
+    gap: 6px;
+  }
+  
+  .chip {
+    font-size: 0.7rem;
+    padding: 4px 8px;
+  }
+  
+  /* Tables - improve mobile viewing */
+  .table-wrapper {
+    margin-top: 8px;
+    border-radius: 6px;
+  }
+  
+  table {
+    font-size: 0.75rem;
+  }
+  
+  th, td {
+    padding: 8px 6px;
+    font-size: 0.75rem;
+  }
+  
+  th {
+    font-size: 0.7rem;
+  }
+  
+  /* Edit panel - full screen on mobile */
+  .edit-panel {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 0;
+  }
+  
+  .edit-header {
+    padding: 12px;
+  }
+  
+  #editPanelContent {
+    padding: 0 12px;
+  }
+  
+  .edit-section {
+    padding: 10px;
+  }
+  
+  .edit-input {
+    font-size: 0.85rem;
+  }
+  
+  .edit-actions {
+    padding: 12px;
+    flex-direction: column;
+  }
+  
+  .edit-actions .btn {
+    width: 100%;
+  }
+  
+  /* Analysis section */
   .analysis-wrapper {
     padding: 12px;
   }
-  .edit-panel {
+  
+  .analysis-filters {
+    padding: 10px;
+  }
+  
+  .analysis-period-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .analysis-period-row input[type="date"] {
     width: 100%;
+  }
+  
+  .analysis-actions-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  /* Advanced filters - stack vertically */
+  .advanced-filter-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+  
+  .advanced-filter-row > div {
+    width: 100%;
+  }
+  
+  .advanced-filter-row input,
+  .advanced-filter-row select {
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+  
+  /* Period row - stack on mobile */
+  .period-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .period-blocks {
+    width: 100%;
+  }
+  
+  .period-status {
+    width: 100%;
+    align-items: flex-start;
+  }
+  
+  .period-status-text {
+    text-align: left;
+    max-width: 100%;
+  }
+  
+  /* KPI boxes - single column on mobile */
+  .kpi-container {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  /* Modal panels - full screen on mobile */
+  .modal-panel {
+    width: 95vw;
+    max-width: 95vw;
+    padding: 16px;
+  }
+  
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  /* Loading overlay */
+  .loading-box {
+    width: 90%;
+    max-width: 280px;
+    padding: 20px;
+  }
+  
+  /* Learning card */
+  .learning-textarea {
+    min-height: 120px;
+    font-size: 11px;
+  }
+  
+  .learning-buttons-row {
+    flex-direction: column;
+  }
+  
+  .learning-btn {
+    width: 100%;
+  }
+}
+
+/* Extra small devices (480px and below) */
+@media (max-width: 480px) {
+  body {
+    padding: 5px;
+  }
+  
+  .app-container {
+    padding: 5px;
+  }
+  
+  .topbar {
+    padding: 10px;
+  }
+  
+  .app-logo {
+    width: 35px;
+    height: 35px;
+  }
+  
+  .app-name {
+    font-size: 0.75rem;
+  }
+  
+  .section-title {
+    font-size: 0.95rem;
+  }
+  
+  .section-subtitle {
+    font-size: 0.75rem;
+  }
+  
+  .nav-tab {
+    font-size: 0.7rem;
+    padding: 5px 10px;
+  }
+  
+  .card-title {
+    font-size: 0.85rem;
+  }
+  
+  .card-subtitle {
+    font-size: 0.7rem;
+  }
+  
+  table {
+    font-size: 0.7rem;
+  }
+  
+  th, td {
+    padding: 6px 4px;
+    font-size: 0.7rem;
+  }
+  
+  .btn {
+    font-size: 0.8rem;
+    padding: 9px 12px;
+  }
+}
+
+/* Landscape mobile devices */
+@media (max-height: 500px) and (orientation: landscape) {
+  .edit-panel {
+    overflow-y: auto;
+  }
+  
+  #editPanelContent {
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+  }
+  
+  .topbar {
+    padding: 8px 12px;
+  }
+  
+  .app-logo {
+    width: 30px;
+    height: 30px;
   }
 }
 
@@ -1533,6 +1881,43 @@ tr.match-source-row td {
     outline: 2px solid var(--sys-tint-blue);
     outline-offset: 2px;
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--sys-tint-blue) 30%, transparent); /* Alone luminoso (Glow) */
+}
+
+/* Touch-friendly improvements for mobile devices */
+@media (hover: none) and (pointer: coarse) {
+  /* Increase touch target sizes for better accessibility */
+  button, .btn, .nav-tab, .filter-btn, input[type="file"]::file-selector-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Remove hover effects on touch devices */
+  .btn:hover, .nav-tab:hover, .filter-btn:hover {
+    transform: none;
+  }
+  
+  /* Add active state for better feedback */
+  .btn:active, .nav-tab:active, .filter-btn:active {
+    opacity: 0.8;
+    transform: scale(0.98);
+  }
+  
+  /* Better tap highlighting */
+  * {
+    -webkit-tap-highlight-color: rgba(0, 122, 255, 0.1);
+  }
+  
+  /* Prevent text selection on buttons */
+  button, .btn, .nav-tab {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  /* Better scroll behavior on touch */
+  .table-wrapper, .topbar-nav, .filter-row {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
 }
 
 /* Fallback per Glassmorphism */
