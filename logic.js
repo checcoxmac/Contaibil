@@ -1833,6 +1833,28 @@ function formatDateForUI(dateObj) {
     }
   }
   
+  // ============================================================
+  // 🆕 RICERCA COLONNA TOTALE ADE (opzionale)
+  // ============================================================
+  // Alcuni file ADE possono avere una colonna "Totale documento"
+  // Se presente e valorizzata, la usiamo; altrimenti calcoliamo imp+iva
+  let colTot = cfg.tot;
+  if (!colTot) {
+    // Cerca colonne che potrebbero contenere il totale
+    const idxTotAde = H.indexOf("Totale documento");
+    if (idxTotAde !== -1) {
+      colTot = H[idxTotAde];
+      console.log(`✅ ADE Totale trovato: colonna [${idxTotAde}] = "${colTot}"`);
+    } else {
+      // Fallback: cerca case-insensitive
+      const idxFallback = h.indexOf("totale documento");
+      if (idxFallback !== -1) {
+        colTot = H[idxFallback];
+        console.log(`⚠️ ADE Totale trovato (lowercase): colonna [${idxFallback}] = "${colTot}"`);
+      }
+    }
+  }
+  
   const colTipo  = findCol(H, h, "tipo documento");
 
   // 🔍 DEBUG: Log mapping colonne per diagnostica
@@ -1843,6 +1865,7 @@ function formatDateForUI(dateObj) {
   console.log(`   Denominazione: "${colDenFor}"`);
   console.log(`   ⭐ Imponibile: "${colImp}"`);
   console.log(`   ⭐ IVA: "${colIva}"`);
+  console.log(`   ⭐ Totale: "${colTot || '(nessuna - sarà calcolato)'}"`);
   console.log(`   Tipo Documento: "${colTipo}"`);
 
   updateColumnConfig("ADE", {
@@ -1851,7 +1874,8 @@ function formatDateForUI(dateObj) {
     piva: colPivaFor || colPivaCli,
     den: colDenFor,
     imp: colImp,
-    iva: colIva
+    iva: colIva,
+    tot: colTot
   });
 
   const recs = [];
@@ -1877,59 +1901,27 @@ function formatDateForUI(dateObj) {
     const data = parseDateFlexible(dataIso);                   // Oggetto Date per confronti (usa ISO già normalizzato)
     const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
-    // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
-    let impRaw = r[colImp] || "";
-    let ivaRaw = r[colIva] || "";
+    // ============================================================
+    // ===== PARSING IMPORTI ADE - IMMUTABILE =====
+    // ============================================================
+    // REQUISITO: Trattare imponibile e imposta da ADE come valori ufficiali
+    // NON modificare, NON correggere, NON sovrascrivere
+    // Usare i valori del file ADE esattamente come sono
+    // ============================================================
     
-    // 🔧 AUTO-FIX PRE-PARSING (versione prudente)
-    if (
-      colImp && colData &&
-      colImp === colData &&
-      impRaw &&
-      String(impRaw).includes("/") &&
-      String(impRaw).match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
-    ) {
-      console.warn(`⚠️ ADE [${num}]: Imponibile contiene una DATA ("${impRaw}") sulla stessa colonna della data. Provo a cercare l'importo corretto...`);
-
-      let foundValue = null;
-      let foundCol = null;
-
-      for (let i = 0; i < H.length; i++) {
-        const colName = H[i];
-        const val = r[colName] || "";
-
-        if (String(val).includes("/")) continue;
-        if (String(val).length === 11 && !isNaN(val)) continue;
-
-        const lowerName = colName.toLowerCase();
-        if (lowerName.includes("data")) continue;
-        if (lowerName.includes("partita")) continue;
-        if (lowerName.includes("codice")) continue;
-
-        const numVal = parseNumberIT(val);
-        if (numVal >= 1 && numVal < 999999) {
-          foundValue = numVal;
-          foundCol = colName;
-          break;
-        }
-      }
-
-      if (foundValue !== null) {
-        console.log(`   ✅ CORRETTO IMPONIBILE ADE: uso ${foundValue} € da colonna "${foundCol}"`);
-        impRaw = String(foundValue);
-      } else {
-        console.error(`   ❌ Nessun valore numerico imponibile trovato nella riga ADE. Lascio imponibile = 0`);
-        impRaw = "0";
-      }
-    }
-
-    // 🔍 DEBUG: Log valori grezzi (DOPO auto-fix se necessario)
+    const impRaw = r[colImp] || "";
+    const ivaRaw = r[colIva] || "";
+    const totRaw = colTot ? (r[colTot] || "") : "";
+    
+    // 🔍 DEBUG: Log valori grezzi VERBATIM dal file ADE
     if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE:`);
+      console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE VERBATIM:`);
       console.log(`   📊 Colonna Imponibile: "${colImp}"`);
-      console.log(`   📊 Valore grezzo (dopo auto-fix): "${impRaw}"`);
+      console.log(`   📊 Valore grezzo: "${impRaw}"`);
       console.log(`   📊 Colonna IVA: "${colIva}"`);
       console.log(`   📊 Valore grezzo IVA: "${ivaRaw}"`);
+      console.log(`   📊 Colonna Totale: "${colTot || '(nessuna)'}"`);
+      console.log(`   📊 Valore grezzo Totale: "${totRaw}"`);
       
       // Mostra TUTTA la riga
       console.log(`   📋 RIGA COMPLETA:`, r);
@@ -1938,23 +1930,29 @@ function formatDateForUI(dateObj) {
       });
     }
     
-    // ORA fai il parsing con il valore corretto
-    let imp = parseNumberIT(impRaw);
-    let iva = cleanIVAValue(ivaRaw, piva);
-    let tot = +(imp + iva).toFixed(2);
+    // ✅ PARSING DIRETTO - Nessuna correzione, nessun auto-fix
+    // Parse imponibile e IVA esattamente come vengono dal file ADE
+    const imp = parseNumberIT(impRaw);
+    const iva = parseNumberIT(ivaRaw);  // NON usa cleanIVAValue - parsing diretto
     
-    // 🔍 DEBUG: Valori dopo parsing
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
+    // ✅ TOTALE CONDIZIONALE
+    // Se ADE_Totale è presente e non-zero, usalo
+    // Altrimenti calcola come round(imp + iva, 2)
+    let tot;
+    const totFromFile = parseNumberIT(totRaw);
+    if (totFromFile !== 0) {
+      // Totale presente nel file ADE - usalo verbatim
+      tot = totFromFile;
+      console.log(`   ℹ️ ADE [${num}]: Totale da file ADE: ${tot}`);
+    } else {
+      // Totale mancante o zero - calcola
+      tot = +(imp + iva).toFixed(2);
+      console.log(`   ℹ️ ADE [${num}]: Totale calcolato (imp+iva): ${tot}`);
     }
     
-    // ✅ VALIDAZIONE IMPORTI
-    const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
-    tot = validated.tot;
-    
-    // 🔍 DEBUG FINALE: Valori nel record
+    // 🔍 DEBUG: Valori dopo parsing IMMUTABILE
     if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ RECORD FINALE: imp=${imp}, iva=${iva}, tot=${tot}`);
+      console.log(`   ✅ VALORI FINALI (IMMUTABILI): imp=${imp}, iva=${iva}, tot=${tot}`);
       console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
@@ -3357,6 +3355,39 @@ function matchRecords(adeList, gestList) {
           DIFF_TOTALE: 0  // Non applicabile per righe non matchate
         });
       }
+    }
+
+    // ============================================================
+    // 🌍 INCLUSIONE RIGHE ESTERE (FOREIGN)
+    // ============================================================
+    // REQUISITO: Includere tutte le righe isForeign con status esplicito
+    // Non skippare mai nessuna riga - assegnare sempre uno stato
+    // ============================================================
+    const foreignAde = adeList.filter(r => r.isForeign);
+    const foreignGest = gestList.filter(r => r.isForeign);
+    
+    for (const a of foreignAde) {
+      results.push({
+        ADE: a,
+        GEST: null,
+        STATUS: "SOLO_ADE",
+        CRITERIO: "FOREIGN_PIVA",
+        NOTE_MATCH: "Fattura estera (P.IVA non italiana) - fuori perimetro matching",
+        ORIGINE: "SOLO_ADE",
+        DIFF_TOTALE: 0
+      });
+    }
+    
+    for (const g of foreignGest) {
+      results.push({
+        ADE: null,
+        GEST: g,
+        STATUS: "SOLO_GEST",
+        CRITERIO: "FOREIGN_PIVA",
+        NOTE_MATCH: "Fattura estera (P.IVA non italiana) - fuori perimetro matching",
+        ORIGINE: "SOLO_GESTIONALE",
+        DIFF_TOTALE: 0
+      });
     }
 
     // ============================================================
