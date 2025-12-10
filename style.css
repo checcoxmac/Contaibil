@@ -1656,7 +1656,7 @@ tr.match-source-row td {
   /* Learning card */
   .learning-textarea {
     min-height: 120px;
-    font-size: 10px;
+    font-size: 11px;
   }
   
   .learning-buttons-row {
