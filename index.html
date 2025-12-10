@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <title>ContAIbil – Workspace Fatture</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#FFFFFF" />
+  
+  <!-- COLLEGAMENTO CSS -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <div id="loadingText" class="loading-text">Elaborazione in corso...</div>
+      <div class="loading-progress-bar">
+        <div id="loadingProgress" class="loading-progress-fill"></div>
+      </div>
+    </div>
+  </div>
+  <div class="app-container">
+    <!-- HEADER -->
+    <div class="topbar">
+      <div class="topbar-main">
+        <div class="topbar-left">
+          <!-- Logo CA -->
+          <div class="app-logo">
+            <div class="app-logo-inner">CA</div>
+          </div>
+          <!-- Titoli -->
+          <div class="topbar-titles">
+            <div class="app-name">ContAIbil</div>
+            <div class="section-title">
+              <span>Riconciliazione ADE / Gestionale</span>
+            </div>
+            <div class="section-subtitle">
+              Match fatture acquisto, note credito e quadrature periodiche
+            </div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button id="btnWideMode" class="btn-topbar-icon" title="Passare a modalità a schermo intero (nascondi sidebar)">
+            <span>⛶</span>
+          </button>
+          <button id="btnCompactMode" class="btn-topbar-icon" title="Attiva vista compatta (tipo Excel)">
+            <span>🗋</span>
+          </button>
+          <div class="pill-env">
+            <span class="pill-dot"></span>
+            <span>Workspace Fatture Acquisto</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nav sezioni -->
+      <div class="topbar-nav">
+        <button class="nav-tab main-tab-label active" data-section="section-recon">
+          <span class="nav-pill">●</span>
+          Riconciliazione ADE / Gestionale
+        </button>
+        <button class="nav-tab" data-section="section-analysis">
+          Analisi fornitori (ADE)
+        </button>
+        <button class="nav-tab" data-section="section-dashboard">
+          Dashboard / KPI
+        </button>
+        <button class="nav-tab" data-section="section-vat">
+          Liquidazione IVA (ADE)
+        </button>
+      </div>
+    </div>
+
+    
+
+    <!-- SEZIONI -->
+    <div class="sections-wrapper">
+      <!-- SEZIONE 1: RICONCILIAZIONE -->
+      <div class="section active" id="section-recon">
+        <div class="main">
+          <!-- SIDE COLUMN: FILE INPUTS -->
+          <div class="col-side">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">📁</span>
+                    File A · ADE
+                  </div>
+                  <div class="card-subtitle">CSV/XLSX export fatture acquisto da portale ADE</div>
+                </div>
+                <div class="badge-soft">Obbligatorio</div>
+              </div>
+              <div class="file-block">
+                <label for="fileA">Seleziona il file ADE (CSV o XLSX)</label>
+                <input id="fileA" type="file"
+                       accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">🏷️</span>
+                    File B · Gestionale Fatture
+                  </div>
+                  <div class="card-subtitle">CSV/XLSX fatture acquisto (Contel / Mexal)</div>
+                </div>
+                <div class="badge-soft">Obbligatorio</div>
+              </div>
+              <div class="file-block">
+                <label for="fileB">Seleziona file fatture acquisto</label>
+                <input id="fileB" type="file"
+                       accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <button type="button" id="btnForceMapB" class="btn btn-tertiary btn-force-map" title="Forza la scelta delle colonne per questo file">
+                  Forza mapping colonne
+                </button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">↩️</span>
+                    File C · Note Credito
+                  </div>
+                  <div class="card-subtitle">CSV/XLSX note di credito acquisto da gestionale</div>
+                </div>
+                <div class="badge-soft">Opzionale</div>
+              </div>
+              <div class="file-block">
+                <label for="fileC">Seleziona file note credito (se disponibile)</label>
+                <input id="fileC" type="file"
+                       accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <button type="button" id="btnForceMapC" class="btn btn-tertiary btn-force-map" title="Forza la scelta delle colonne per questo file">
+                  Forza mapping colonne
+                </button>
+              </div>
+            </div>
+            <!-- CARD · APPRENDIMENTO CONTAIBIL -->
+    <div class="card learning-card">
+      <div class="card-header">
+        <div>
+          <div class="card-title learning-title-row">
+            <span class="emoji">🧠</span>
+            <span>Procedure azienda / Apprendimento</span>
+            <span class="learning-dot"></span>
+          </div>
+          <div class="card-subtitle">
+            Regole che ContAIbil impara dalle tue correzioni sui match.
+          </div>
+        </div>
+        <div class="badge-soft learning-badge">Auto-learning</div>
+      </div>
+
+      <div class="learning-body">
+        <textarea
+          id="learningCodeBox"
+          class="learning-textarea"
+          placeholder="// Qui compariranno le regole apprese automaticamente
+// Esempio: mapping numeri documento, denominazioni particolari, arrotondamenti..."
+        ></textarea>
+
+        <div class="learning-buttons-row">
+          <button type="button" id="btnSaveProcedures" class="btn btn-secondary learning-btn">
+            💾 Salva procedure
+          </button>
+          <button type="button" id="btnLoadProcedures" class="btn btn-tertiary learning-btn">
+            📂 Carica procedure
+          </button>
+          <input type="file" id="fileProcedures" accept=".json" style="display:none;" />
+        </div>
+
+        <div class="learning-hint">
+          ContAIbil crea nuove regole quando trasformi un MATCH_FIX in MATCH OK
+          o quando sistemi manualmente un abbinamento ADE / Gestionale.
+          Puoi esportare il file JSON e riutilizzarlo su altri clienti o periodi.
+        </div>
+      </div>
+    </div> <!-- fine learning-card -->
+  </div> <!-- fine col-side -->
+
+          <!-- MAIN COLUMN: ACTIONS + TABLE -->
+          <div class="col-main">
+            <div class="card">
+               <div class="actions-row">
+                 <div class="actions-left">
+                   <button id="btnMatch" class="btn btn-primary">
+                     <span class="btn-icon">⚙️</span>
+                     Confronta fatture
+                   </button>
+                   
+                   <div class="export-group">
+                     <div class="export-label">Esportazioni:</div>
+                     <button id="btnExportFiltered" class="btn btn-secondary btn-highlight" disabled title="Esporta solo le righe attualmente visibili in tabella (filtrate)">
+                       <span class="btn-icon">👁️</span>
+                       VISTA ATTUALE
+                     </button>
+                     <div class="vr-separator"></div>
+                     <button id="btnExportAll" class="btn btn-tertiary" disabled>Tutti</button>
+                     <button id="btnExportAde" class="btn btn-tertiary" disabled>Solo ADE</button>
+                     <button id="btnExportGest" class="btn btn-tertiary" disabled>Solo Gest</button>
+                     <button id="btnExportFix" class="btn btn-tertiary" disabled>Solo Fix</button>
+                   </div>
+                 </div>
+                 
+                 <div class="actions-right">
+                   <button id="btnUndoDelete" class="btn btn-tertiary" disabled>
+                     Annulla elimina
+                   </button>
+                   <button id="btnResetAll" class="btn btn-tertiary" disabled>
+                     Ripristina tutto
+                   </button>
+                   <span id="statusText" class="status-text">Nessun confronto eseguito.</span>
+                 </div>
+               </div>
+ 
+              <div class="summary" id="summaryRow" style="display:none;">
+                <div class="chip">
+                  <span class="chip-dot dot-green"></span>
+                  Match OK: <span id="cntOk">0</span>
+                </div>
+                <div class="chip">
+                  <span class="chip-dot dot-yellow"></span>
+                  Match da correggere: <span id="cntFix">0</span>
+                </div>
+                <div class="chip">
+                  <span class="chip-dot dot-red"></span>
+                  Solo ADE: <span id="cntAde">0</span>
+                </div>
+                <div class="chip">
+                  <span class="chip-dot dot-blue"></span>
+                  Solo Gestionale: <span id="cntGest">0</span>
+                </div>
+              </div>
+
+              <!-- Box copertura periodo -->
+              <div class="period-row" id="periodRow">
+                <div class="period-blocks">
+                  <div class="period-title">Copertura periodo</div>
+                  <div class="period-line">
+                    <span class="period-label">ADE:</span>
+                    <span class="period-value" id="periodAde">n/d</span>
+                  </div>
+                  <div class="period-line">
+                    <span class="period-label">Gestionale:</span>
+                    <span class="period-value" id="periodGest">n/d</span>
+                  </div>
+                </div>
+                <div class="period-status">
+                  <div id="periodStatusBadge" class="period-badge period-badge-soft">
+                    ℹ️ In attesa
+                  </div>
+                  <div id="periodStatusText" class="period-status-text">
+                    Carica i file ADE e gestionale e lancia il confronto per vedere la copertura reale.
+                  </div>
+                </div>
+              </div>
+
+              <div class="filter-row" id="filterRow" style="display:none;">
+                <button class="filter-btn active" data-filter="ALL">Tutti</button>
+                <button class="filter-btn" data-filter="MATCH_OK">Match OK</button>
+                <button class="filter-btn" data-filter="MATCH_FIX">Da correggere</button>
+                <button class="filter-btn" data-filter="SOLO_ADE">Solo ADE</button>
+                <button class="filter-btn" data-filter="SOLO_GEST">Solo Gestionale</button>
+              </div>
+            </div>
+
+            <!-- FILTRI AVANZATI: MESE ADE + FORNITORE -->
+  <div class="advanced-filter-row"
+     id="advancedFilterRow"
+     style="display:none; margin-top: 8px; gap:12px; flex-wrap:wrap; align-items:center;">
+  <div style="font-size:12px; opacity:0.8;">Filtri aggiuntivi:</div>
+
+  <!-- Filtro mese ADE -->
+  <div>
+    <label for="monthFilter" style="font-size:12px; opacity:0.8; display:block;">Mese (data ADE)</label>
+    <select id="monthFilter" style="min-width: 200px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:#020617; color:#e5e7eb;">
+      <option value="">Tutti i mesi ADE</option>
+      <!-- le altre opzioni vengono riempite da logic.js -->
+    </select>
+  </div>
+
+  <!-- Filtro fornitore -->
+  <div>
+    <label for="supplierFilterInput" style="font-size:12px; opacity:0.8; display:block;">Fornitore (denominazione o P.IVA)</label>
+    <input id="supplierFilterInput"
+           type="text"
+           placeholder="Es. WIND, 1337820152..."
+           style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:#020617; color:#e5e7eb;">
+  </div>
+
+  <!-- Filtro numero fattura -->
+  <div>
+    <label for="filterInvoice" style="font-size:12px; opacity:0.8; display:block;">Numero fattura (ADE o Gestionale)</label>
+    <input id="filterInvoice"
+           type="text"
+           placeholder="Es. 921933, 73/2025, 001234..."
+           style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:#020617; color:#e5e7eb;">
+  </div>
+
+  <!-- Pulsante per azzerare i filtri -->
+  <button type="button"
+          id="btnClearFilters"
+          class="btn btn-tertiary"
+          style="font-size:12px; padding:4px 10px; margin-top:16px;">
+    ⟳ Pulisci filtri
+  </button>
+</div>
+
+            <div class="table-card">
+              <div class="table-header">
+                 <div>
+                   <div class="table-title">Risultato riconciliazione</div>
+                   <div class="table-subtitle">Vista combinata ADE / Gestionale</div>
+                 </div>
+                 <button id="btnToggleExpand" class="btn btn-tertiary btn-icon-only" title="Allarga/Stringi Tabella">
+                   ⤢ Modalità Estesa
+                 </button>
+               </div>
+ 
+              <div class="table-wrapper" id="tableContainer" style="display:none;">
+                <table id="resultTable">
+                  <thead>
+                    <tr>
+                      <th colspan="7" style="text-align:center; background:var(--sys-bg-content-alt); border-bottom:1px solid var(--sys-separator);">Dati ADE</th>
+                      <th colspan="6" style="text-align:center; background:var(--sys-bg-content); border-bottom:1px solid var(--sys-separator);">Dati Gestionale</th>
+                      <th colspan="3" style="text-align:center; background:var(--sys-bg-content-alt); border-bottom:1px solid var(--sys-separator);">Esito</th>
+                    </tr>
+                    <tr>
+                      <th style="width: 110px;">Num</th>
+                      <th style="width: 280px;">Denominazione</th>
+                      <th style="width: 120px;">P.IVA</th>
+                      <th style="width: 100px;">Data</th>
+                      <th style="width: 100px; text-align:right;">Imp.</th>
+                      <th style="width: 80px; text-align:right;">Iva</th>
+                      <th style="width: 100px; text-align:right;">Totale</th>
+
+                      <th style="width: 110px;">Num</th>
+                      <th style="width: 280px;">Denominazione</th>
+                      <th style="width: 100px;">Data</th>
+                      <th style="width: 100px; text-align:right;">Imp.</th>
+                      <th style="width: 80px; text-align:right;">Iva</th>
+                      <th style="width: 100px; text-align:right;">Totale</th>
+
+                      <th style="width: 140px;">Stato</th>
+                      <th style="width: 200px;">Criterio</th>
+                      <th style="width: 80px;">Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+
+              <div class="footer-note">
+                Puoi cliccare sulle righe con stato <strong>MATCH_FIX</strong> o <strong>SOLO GESTIONALE</strong> per correggere i dati del gestionale, oppure eliminare la parte gestionale con il cestino.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SEZIONE 2: ANALISI FORNITORI -->
+      <div class="section" id="section-analysis">
+        <div class="analysis-wrapper">
+          <div class="analysis-header">
+            <div class="analysis-title">Analisi fornitori (da ADE)</div>
+            <div class="analysis-subtitle">
+              Pesa i fornitori in base alle fatture presenti in ADE, su un periodo di analisi selezionato.
+            </div>
+          </div>
+
+          <div class="analysis-filters">
+            <div class="analysis-period-row">
+              <span>Periodo di analisi:</span>
+              <div>
+                <label for="anStart">Dal</label>
+                <input type="date" id="anStart" />
+              </div>
+              <div>
+                <label for="anEnd">Al</label>
+                <input type="date" id="anEnd" />
+              </div>
+              <div class="analysis-period-quick">
+                <button type="button" class="pill-small" id="btnAnAll">Tutto ADE</button>
+                <button type="button" class="pill-small" id="btnAnYear">Anno corrente</button>
+                <button type="button" class="pill-small" id="btnAnLast12">Ultimi 12 mesi</button>
+              </div>
+            </div>
+
+            <div class="analysis-actions-row">
+              <button type="button" class="btn btn-secondary" id="btnAnApply">
+                Applica filtro periodo
+              </button>
+              <span id="analysisStatus" class="analysis-status">
+                In attesa dati ADE: carica il file nella sezione Riconciliazione.
+              </span>
+            </div>
+
+            <div class="analysis-search-row">
+              <input type="text" id="anSearch" placeholder="Cerca fornitore o P.IVA..." />
+              <span id="analysisCount" class="analysis-count">Fornitori nel periodo: 0</span>
+            </div>
+          </div>
+
+          <div class="analysis-table-card">
+            <div class="analysis-table-header">
+              <div>
+                <div class="table-title">Elenco fornitori ADE</div>
+                <div class="table-subtitle">
+                  Ordinati per totale complessivo (imponibile + IVA) in ordine decrescente.
+                </div>
+              </div>
+            </div>
+
+            <div class="table-wrapper" id="analysisTableContainer" style="display:none;">
+              <table id="analysisTable">
+                <thead>
+                  <tr>
+                    <th style="width: 250px;">Fornitore<div class="resizer"></div></th>
+                    <th style="width: 130px;">P.IVA<div class="resizer"></div></th>
+                    <th style="width: 150px;">Tot. imponibile<div class="resizer"></div></th>
+                    <th style="width: 150px;">Tot. IVA<div class="resizer"></div></th>
+                    <th style="width: 150px;">Tot. complessivo<div class="resizer"></div></th>
+                    <th style="width: 100px;">N. fatture<div class="resizer"></div></th>
+                    <th style="width: 200px;">Periodo<div class="resizer"></div></th>
+                  </tr>
+                </thead>
+                <tbody id="analysisTbody"></tbody>
+              </table>
+            </div>
+
+            <div class="analysis-footer-note">
+              L’analisi utilizza solo i dati del file ADE (fatture acquisto) nel periodo selezionato.
+            </div>
+          </div>
+        </div>
+      </div>
+
+            <!-- SEZIONE 3: DASHBOARD / KPI -->
+<div class="section" id="section-dashboard">
+  <div class="analysis-wrapper">
+    <div class="analysis-header">
+      <div class="analysis-title">Dashboard allineamento periodi</div>
+      <div class="analysis-subtitle">
+        Stato mensile di allineamento tra fatture ADE e registrazioni in gestionale.
+      </div>
+    </div>
+
+            <!-- Riepilogo sintetico sopra la tabella -->
+            <p id="kpiPeriodSummary"
+               class="analysis-status"
+               style="margin: 8px 0 12px;">
+              Esegui un confronto fatture per vedere lo stato di allineamento mensile.
+            </p>
+
+            <div class="table-wrapper" id="kpiPeriodTableContainer" style="display:block;">
+              <table id="kpiPeriodTable">
+                <thead>
+                  <tr>
+                    <th style="width: 150px;">Mese<div class="resizer"></div></th>
+                    <th class="mono" style="width: 120px;">Fatture ADE<div class="resizer"></div></th>
+                    <th class="mono" style="width: 120px;">Match OK<div class="resizer"></div></th>
+                    <th class="mono" style="width: 120px;">Match da correggere<div class="resizer"></div></th>
+                    <th class="mono" style="width: 120px;">Solo ADE<div class="resizer"></div></th>
+                    <th class="mono" style="width: 120px;">Solo Gest.<div class="resizer"></div></th>
+                    <th style="width: 200px;">Stato<div class="resizer"></div></th>
+                  </tr>
+                </thead>
+                <tbody id="kpiPeriodTbody">
+                  <!-- riempito da logic.js -->
+                </tbody>
+              </table>
+            </div>
+
+            <div class="analysis-footer-note">
+              Lo stato di ogni mese è calcolato sulle righe ADE del risultato di riconciliazione
+              (MATCH OK, MATCH_FIX, SOLO ADE, SOLO GEST).
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SEZIONE 4: LIQUIDAZIONE IVA -->
+      <div class="section" id="section-vat">
+        <div class="analysis-wrapper">
+          <div class="analysis-header">
+            <div class="analysis-title">Riepilogo IVA (Dati ADE)</div>
+            <div class="analysis-subtitle">
+              Raggruppamento mensile imponibile e imposta basato sulla Data Fattura ADE.
+            </div>
+          </div>
+
+          <div class="kpi-container">
+              <div class="kpi-box">
+                  <div class="kpi-label">Totale Imponibile</div>
+                  <div class="kpi-value" id="vatTotImp">€ 0,00</div>
+              </div>
+              <div class="kpi-box" style="border-color: #ef4444;">
+                  <div class="kpi-label">Totale IVA</div>
+                  <div class="kpi-value" id="vatTotIva">€ 0,00</div>
+              </div>
+              <div class="kpi-box" style="border-color: #10b981;">
+                  <div class="kpi-label">Valore Totale Documenti</div>
+                  <div class="kpi-value" id="vatTotDoc">€ 0,00</div>
+              </div>
+          </div>
+
+          <div class="analysis-table-card">
+            <div class="analysis-table-header">
+              <div>
+                <div class="table-title">Dettaglio Mensile</div>
+              </div>
+              <button id="btnExportVat" class="btn btn-tertiary btn-icon-only" title="Esporta prospetto IVA">
+                 📥 Esporta CSV
+              </button>
+            </div>
+
+            <div class="table-wrapper" style="display:block;">
+              <table id="vatTable">
+                <thead>
+                  <tr>
+                    <th style="width: 150px;">Periodo (Mese)<div class="resizer"></div></th>
+                    <th style="width: 100px;">N. Fatture<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 150px;">Imponibile<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 150px;">IVA<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 150px;">Totale Fattura<div class="resizer"></div></th>
+                  </tr>
+                </thead>
+                <tbody id="vatTbody">
+                  </tbody>
+              </table>
+            </div>
+            
+            <div class="analysis-footer-note">
+              Attenzione: I dati si basano sulla data documento presente nel file ADE, non sulla data di competenza/detrazione effettiva.
+            </div>
+          </div>
+        </div>
+      </div>
+
+        <!-- Popup mapping colonne GESTIONALE -->
+<div id="gestMapBackdrop" class="modal-backdrop hidden">
+  <div class="modal-panel">
+    <h3 id="gestMapTitle">Aggancio colonne gestionale (File B)</h3>
+    <p>
+      Seleziona per ogni campo ContAIbil la colonna corretta del file
+      (Mexal/Contel). Puoi salvarla nelle procedure così non dovrai rifarlo ogni volta.
+    </p>
+
+    <div class="form-grid">
+      <div>
+        <label for="selGestNum">
+          Numero fattura / documento<br />
+          <select id="selGestNum"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestPiva">
+          Partita IVA fornitore<br />
+          <select id="selGestPiva"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestDen">
+          Denominazione fornitore<br />
+          <select id="selGestDen"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestData">
+          Data DOCUMENTO (per il match)<br />
+          <select id="selGestData"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestDataReg">
+          Data REGISTRAZIONE (per IVA/Filtri)<br />
+          <select id="selGestDataReg"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestImp">
+          Imponibile<br />
+          <select id="selGestImp"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestIva">
+          IVA<br />
+          <select id="selGestIva"></select>
+        </label>
+      </div>
+
+      <div>
+        <label for="selGestTot">
+          Totale documento<br />
+          <select id="selGestTot"></select>
+        </label>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" id="btnGestMapCancel">Annulla</button>
+      <button type="button" id="btnGestMapOk" class="primary">
+        Usa queste colonne
+      </button>
+    </div>
+  </div>
+</div>
+
+    <!-- EDIT PANEL (MODIFICA MATCH) -->
+    <div id="editPanelBackdrop" class="edit-backdrop hidden">
+      <div id="editPanel" class="edit-panel">
+        <div class="edit-header">
+          <div>
+            <div class="edit-title">Modifica riga match</div>
+            <div class="edit-subtitle" id="editRowInfo">Seleziona una riga MATCH_FIX o SOLO GESTIONALE dalla tabella.</div>
+          </div>
+          <button type="button" id="editCloseBtn" class="edit-close-btn">✕</button>
+        </div>
+        
+        <div id="editPanelContent">
+          <div class="edit-section">
+            <div class="edit-section-title">Dati ADE (sola lettura)</div>
+            <div class="edit-grid">
+              <div class="edit-field">
+                <label>Numero fattura</label>
+                <div class="edit-read" id="editAdeNum"></div>
+              </div>
+              <div class="edit-field">
+                <label>Denominazione</label>
+                <div class="edit-read" id="editAdeDen"></div>
+              </div>
+              <div class="edit-field">
+                <label>P.IVA</label>
+                <div class="edit-read" id="editAdePiva"></div>
+              </div>
+              <div class="edit-field">
+                <label>Data</label>
+                <div class="edit-read" id="editAdeData"></div>
+              </div>
+              <div class="edit-field">
+                <label>Imponibile / IVA / Totale</label>
+                <div class="edit-read" id="editAdeImpIvaTot"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="edit-section" id="editGestSection">
+            <div class="edit-section-title">Dati Gestionale (modificabili)</div>
+            <div class="edit-grid">
+              <div class="edit-field">
+                <label>Numero documento</label>
+                <input id="editGestNum" class="edit-input" type="text" />
+              </div>
+              <div class="edit-field">
+                <label>Denominazione conto / fornitore</label>
+                <input id="editGestDen" class="edit-input" type="text" />
+              </div>
+              <div class="edit-field">
+                <label>Data</label>
+                <input id="editGestData" class="edit-input" type="text" placeholder="es. 31/03/2025" />
+              </div>
+              <div class="edit-field">
+                <label>Imponibile</label>
+                <input id="editGestImp" class="edit-input" type="text" placeholder="es. 1000,00" />
+              </div>
+              <div class="edit-field">
+                <label>IVA</label>
+                <input id="editGestIva" class="edit-input" type="text" placeholder="es. 220,00" />
+              </div>
+              <div class="edit-field">
+                <label>Totale</label>
+                <input id="editGestTot" class="edit-input" type="text" placeholder="es. 1220,00" />
+              </div>
+            </div>
+          </div>
+
+          <div class="editor-group">
+            <label for="editStatus">Stato:</label>
+            <select id="editStatus" class="editor-input">
+              <option value="MATCH_OK">MATCH OK</option>
+              <option value="MATCH_FIX">MATCH DA CORREGGERE</option>
+              <option value="SOLO_ADE">SOLO ADE</option>
+              <option value="SOLO_GEST">SOLO GESTIONALE</option>
+            </select>
+          </div>
+
+          <div class="edit-matchcode-box" style="margin-top: 20px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+    <label style="font-weight: bold; margin: 0;" class="edit-matchcode-title">
+      Report Diagnostico &amp; Note:
+    </label>
+
+    <div style="display: flex; gap: 6px; align-items: center;">
+      <!-- ✅ NUOVO BOTTONE MASSIVO PER FORNITORE -->
+      <button
+        id="editBulkOkSupplier"
+        type="button"
+        class="btn btn-secondary"
+        style="padding: 2px 8px; font-size: 11px; white-space: nowrap;"
+      >
+        ✅ Conferma tutti i match di questo fornitore
+      </button>
+
+      <!-- Bottone copia report già esistente -->
+      <button
+        id="btnCopyReport"
+        type="button"
+        class="btn btn-secondary"
+        style="padding: 2px 8px; font-size: 11px;"
+      >
+        📋 COPIA PER AI
+      </button>
+    </div>
+  </div>
+
+  <textarea
+    id="editMatchNote"
+    placeholder="Il report diagnostico apparirà qui quando apri una riga gialla (MATCH_FIX)..."
+    spellcheck="false"
+  ></textarea>
+</div>
+
+        <div class="edit-actions">
+          <button type="button" id="editSaveBtn" class="btn btn-primary">Salva modifiche</button>
+          <button type="button" id="editDeleteGestBtn" class="btn btn-danger">Elimina parte Gestionale</button>
+          <button type="button" id="editCancelBtn" class="btn btn-ghost">Annulla</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- Libreria per leggere XLSX -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Script principale -->
+  <script src="logic.js"></script>
+
+</body>
+</html>
