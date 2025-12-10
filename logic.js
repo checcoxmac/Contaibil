@@ -1324,7 +1324,7 @@ function formatDateForUI(dateObj) {
         
         if (isCodeVisible) {
           codeBox.style.display = "block";
-          btnView.innerHTML = "👁️ Visualizza Codice";
+          btnView.innerHTML = "👁️ Nascondi Codice";
         } else {
           codeBox.style.display = "none";
           btnView.innerHTML = "👁️ Mostra Codice";
