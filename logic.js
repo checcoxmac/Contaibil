@@ -73,6 +73,24 @@ window.addEventListener("DOMContentLoaded", () => {
   };
 
   // ============================================================
+  // 🐛 DEBUG CONFIGURATION (Dic 2025)
+  // ============================================================
+  const DEBUG_CONFIG = {
+    // Enable/disable debug mode for ADE parsing
+    ENABLED: false,  // Set to true to enable debug logging
+    
+    // Number of ADE rows to log in detail (0 = all, N = first N rows)
+    SAMPLE_SIZE: 10,
+    
+    // What to log when debug is enabled
+    LOG_ORIGINAL_DATA: true,      // Log original ADE values from CSV
+    LOG_NORMALIZED_KEYS: true,    // Log normalized invoice numbers, P.IVA, etc.
+    LOG_CANDIDATES: true,          // Log matching candidates found
+    LOG_DECISION: true,            // Log final match decision
+    LOG_STATUS: true               // Log final status assigned
+  };
+
+  // ============================================================
   // 📊 STATO GLOBALE APPLICAZIONE
   // ============================================================
   let lastAdeRecords = [];
@@ -149,6 +167,36 @@ const ThemeManager = {
         }
     }
 };
+  // ============================================================
+  // 🐛 DEBUG LOGGING HELPER
+  // ============================================================
+  let debugRowCounter = 0;  // Counter for debug logging
+  
+  function debugLog(category, message, data = null) {
+    if (!DEBUG_CONFIG.ENABLED) return;
+    
+    // Check if this category is enabled
+    const categoryMap = {
+      'original': DEBUG_CONFIG.LOG_ORIGINAL_DATA,
+      'normalized': DEBUG_CONFIG.LOG_NORMALIZED_KEYS,
+      'candidates': DEBUG_CONFIG.LOG_CANDIDATES,
+      'decision': DEBUG_CONFIG.LOG_DECISION,
+      'status': DEBUG_CONFIG.LOG_STATUS
+    };
+    
+    if (!categoryMap[category]) return;
+    
+    // Check if we're within sample size limit
+    if (DEBUG_CONFIG.SAMPLE_SIZE > 0 && debugRowCounter > DEBUG_CONFIG.SAMPLE_SIZE) return;
+    
+    const prefix = `🐛 DEBUG [${category.toUpperCase()}]`;
+    if (data) {
+      console.log(`${prefix} ${message}`, data);
+    } else {
+      console.log(`${prefix} ${message}`);
+    }
+  }
+
   function getAdePart(r) {
     return r?.ADE || r?.a || null;
   }
@@ -1834,6 +1882,9 @@ function formatDateForUI(dateObj) {
   }
   
   const colTipo  = findCol(H, h, "tipo documento");
+  
+  // Try to find a total column in ADE (rare but possible)
+  const colTot = cfg.tot || findCol(H, h, "totale documento", "totale fattura", "totale", "importo totale");
 
   // 🔍 DEBUG: Log mapping colonne per diagnostica
   console.log("📋 MAPPING FINALE COLONNE ADE:");
@@ -1843,6 +1894,7 @@ function formatDateForUI(dateObj) {
   console.log(`   Denominazione: "${colDenFor}"`);
   console.log(`   ⭐ Imponibile: "${colImp}"`);
   console.log(`   ⭐ IVA: "${colIva}"`);
+  console.log(`   Totale: "${colTot || '(non trovato, sarà calcolato)'}"`);
   console.log(`   Tipo Documento: "${colTipo}"`);
 
   updateColumnConfig("ADE", {
@@ -1851,23 +1903,29 @@ function formatDateForUI(dateObj) {
     piva: colPivaFor || colPivaCli,
     den: colDenFor,
     imp: colImp,
-    iva: colIva
+    iva: colIva,
+    tot: colTot
   });
 
   const recs = [];
+  
+  // Reset debug counter at start of parsing
+  debugRowCounter = 0;
+  
   for (const r of parsed.rows) {
+    debugRowCounter++;
+    
     const num  = r[colNum]    || "";
     const den  = r[colDenFor] || "";
     const piva = r[colPivaFor] || r[colPivaCli] || "";
 
-    // 🔍 DEBUG FATTURA SPECIFICA - TRACCIA TUTTO IL PROCESSO
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log("🔥🔥🔥 INIZIO PARSING FATTURA 2528012466 🔥🔥🔥");
-      console.log("   Riga grezza completa:", r);
-      console.log("   Numero fattura:", num);
-      console.log("   Denominazione:", den);
-      console.log("   P.IVA:", piva);
-    }
+    // ===== DEBUG LOGGING: ORIGINAL DATA =====
+    debugLog('original', `ADE Row #${debugRowCounter}:`, {
+      num, den, piva,
+      impRaw: r[colImp],
+      ivaRaw: r[colIva],
+      dataRaw: r[colData]
+    });
 
     // ===== GESTIONE DATE ADE - FORMATO ITALIANO RIGIDO =====
     // Le date ADE arrivano SEMPRE in formato italiano DD/MM/YYYY
@@ -1877,86 +1935,49 @@ function formatDateForUI(dateObj) {
     const data = parseDateFlexible(dataIso);                   // Oggetto Date per confronti (usa ISO già normalizzato)
     const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
-    // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
-    let impRaw = r[colImp] || "";
-    let ivaRaw = r[colIva] || "";
+    // ===== GESTIONE IMPORTI - IMMUTABLE APPROACH =====
+    // ⚠️ REQUIREMENT: Do NOT modify ADE amounts based on heuristics
+    // Only parse numeric values, never override based on date checks or validation
     
-    // 🔧 AUTO-FIX PRE-PARSING (versione prudente)
-    if (
-      colImp && colData &&
-      colImp === colData &&
-      impRaw &&
-      String(impRaw).includes("/") &&
-      String(impRaw).match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
-    ) {
-      console.warn(`⚠️ ADE [${num}]: Imponibile contiene una DATA ("${impRaw}") sulla stessa colonna della data. Provo a cercare l'importo corretto...`);
-
-      let foundValue = null;
-      let foundCol = null;
-
-      for (let i = 0; i < H.length; i++) {
-        const colName = H[i];
-        const val = r[colName] || "";
-
-        if (String(val).includes("/")) continue;
-        if (String(val).length === 11 && !isNaN(val)) continue;
-
-        const lowerName = colName.toLowerCase();
-        if (lowerName.includes("data")) continue;
-        if (lowerName.includes("partita")) continue;
-        if (lowerName.includes("codice")) continue;
-
-        const numVal = parseNumberIT(val);
-        if (numVal >= 1 && numVal < 999999) {
-          foundValue = numVal;
-          foundCol = colName;
-          break;
-        }
-      }
-
-      if (foundValue !== null) {
-        console.log(`   ✅ CORRETTO IMPONIBILE ADE: uso ${foundValue} € da colonna "${foundCol}"`);
-        impRaw = String(foundValue);
+    const impRaw = r[colImp] || "";
+    const ivaRaw = r[colIva] || "";
+    
+    // Parse amounts directly WITHOUT any auto-fix or heuristic modifications
+    // ADE_Imponibile and ADE_Iva must be exactly the values from the file after numeric parsing only
+    const imp = parseNumberIT(impRaw);
+    const iva = cleanIVAValue(ivaRaw, piva);
+    
+    // ===== ADE_Totale: Compute ONLY when missing/empty/null/0 =====
+    // Check if there's a total column in ADE (unlikely but possible)
+    let tot = 0;
+    const totRaw = r[colTot] || "";  // colTot may not exist for ADE
+    
+    if (totRaw && totRaw !== "" && totRaw !== null) {
+      // Parse existing total from file
+      const parsedTot = parseNumberIT(totRaw);
+      if (parsedTot !== 0) {
+        // Use existing non-zero total
+        tot = parsedTot;
+        debugLog('original', `ADE Row #${debugRowCounter}: Using existing total from file`, { totRaw, tot });
       } else {
-        console.error(`   ❌ Nessun valore numerico imponibile trovato nella riga ADE. Lascio imponibile = 0`);
-        impRaw = "0";
+        // Total is 0, compute it
+        tot = +(imp + iva).toFixed(2);
+        debugLog('original', `ADE Row #${debugRowCounter}: Total is 0, computed from imp+iva`, { tot });
       }
-    }
-
-    // 🔍 DEBUG: Log valori grezzi (DOPO auto-fix se necessario)
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE:`);
-      console.log(`   📊 Colonna Imponibile: "${colImp}"`);
-      console.log(`   📊 Valore grezzo (dopo auto-fix): "${impRaw}"`);
-      console.log(`   📊 Colonna IVA: "${colIva}"`);
-      console.log(`   📊 Valore grezzo IVA: "${ivaRaw}"`);
-      
-      // Mostra TUTTA la riga
-      console.log(`   📋 RIGA COMPLETA:`, r);
-      H.forEach((colName, idx) => {
-        console.log(`      [${idx}] "${colName}" = "${r[colName]}"`);
-      });
+    } else {
+      // No total in file or empty, compute it
+      tot = +(imp + iva).toFixed(2);
+      debugLog('original', `ADE Row #${debugRowCounter}: No total in file, computed from imp+iva`, { tot });
     }
     
-    // ORA fai il parsing con il valore corretto
-    let imp = parseNumberIT(impRaw);
-    let iva = cleanIVAValue(ivaRaw, piva);
-    let tot = +(imp + iva).toFixed(2);
-    
-    // 🔍 DEBUG: Valori dopo parsing
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
-    }
-    
-    // ✅ VALIDAZIONE IMPORTI
-    const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
-    tot = validated.tot;
-    
-    // 🔍 DEBUG FINALE: Valori nel record
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ RECORD FINALE: imp=${imp}, iva=${iva}, tot=${tot}`);
-      console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
-    }
+    // ===== DEBUG LOGGING: NORMALIZED KEYS =====
+    debugLog('normalized', `ADE Row #${debugRowCounter}:`, {
+      numNorm: normalizeInvoiceNumber(num, false),
+      denNorm: normalizeName(den),
+      pivaDigits: onlyDigits(piva),
+      dataIso,
+      amounts: { imp, iva, tot }
+    });
     
     const tipoDoc = (r[colTipo] || "").toUpperCase();
 
@@ -2666,6 +2687,15 @@ function matchRecords(adeList, gestList) {
       // Classificazione
       const classification = classifyMatchNote(diffTotale, a, g, ncInfo, criterio);
 
+      // ===== DEBUG LOGGING: DECISION =====
+      debugLog('decision', `Match found for ADE #${a.idx} (${a.num})`, {
+        adeNum: a.num,
+        gestNum: g.num,
+        criterio,
+        status: classification.status,
+        diffTotale: diffTotale.toFixed(2)
+      });
+
       const record = {
         ADE: a,
         GEST: g,
@@ -2678,6 +2708,14 @@ function matchRecords(adeList, gestList) {
       };
       
       results.push(record);
+      
+      // ===== DEBUG LOGGING: STATUS =====
+      debugLog('status', `Final status for ADE #${a.idx}`, {
+        num: a.num,
+        status: record.STATUS,
+        criterio: record.CRITERIO
+      });
+      
       return record;  // Restituisce il record creato per permettere modifiche successive
     }
 
@@ -2698,6 +2736,27 @@ function matchRecords(adeList, gestList) {
     // ==========================================
     for (const a of ade) {
       if (matchedAde.has(a.idx)) continue;
+
+      // ===== DEBUG LOGGING: CANDIDATES =====
+      if (DEBUG_CONFIG.ENABLED && debugRowCounter <= DEBUG_CONFIG.SAMPLE_SIZE) {
+        const candidates = gest.filter(g => {
+          if (matchedGest.has(g.idx)) return false;
+          return isL1Match(a, g);
+        });
+        if (candidates.length > 0) {
+          debugLog('candidates', `L1 candidates for ADE #${a.idx} (${a.num})`, {
+            adeNum: a.num,
+            adePiva: a.piva,
+            adeTot: a.tot,
+            candidates: candidates.map(g => ({
+              num: g.num,
+              piva: g.piva,
+              tot: g.tot,
+              diff: Math.abs(a.tot - g.tot).toFixed(2)
+            }))
+          });
+        }
+      }
 
       const matchGest = gest.find(g => {
         if (matchedGest.has(g.idx)) return false;
@@ -3323,12 +3382,22 @@ function matchRecords(adeList, gestList) {
     // ==========================================
     // 🧠 GESTIONE RIGHE NON MATCHATE (SOLO_ADE / SOLO_GEST)
     // Aggiungi NOTE_MATCH descrittive per i casi non associabili
+    // REQUIREMENT: Every ADE row must have explicit status, including foreign rows
     // ==========================================
     for (const a of ade) {
       if (!matchedAde.has(a.idx)) {
         // Riga presente SOLO in ADE
         const origine = "SOLO_ADE";
         const note = "Presente solo in ADE (manca nel gestionale).";
+        
+        // ===== DEBUG LOGGING: STATUS =====
+        debugLog('status', `Unmatched ADE #${a.idx}`, {
+          num: a.num,
+          den: a.den,
+          piva: a.piva,
+          tot: a.tot,
+          status: "SOLO_ADE"
+        });
         
         results.push({ 
           ADE: a, 
@@ -3355,6 +3424,36 @@ function matchRecords(adeList, gestList) {
           NOTE_MATCH: note,
           ORIGINE: origine,
           DIFF_TOTALE: 0  // Non applicabile per righe non matchate
+        });
+      }
+    }
+    
+    // ==========================================
+    // 🌍 INCLUDE FOREIGN ROWS FROM ORIGINAL adeList
+    // REQUIREMENT: Include foreign rows (isForeign) at least as unmatched
+    // ==========================================
+    const foreignAde = adeList.filter(r => r.isForeign);
+    if (foreignAde.length > 0) {
+      console.log(`🌍 Including ${foreignAde.length} foreign ADE rows (isForeign=true) as unmatched`);
+      for (const a of foreignAde) {
+        const note = `Fattura estera (P.IVA non italiana: ${a.piva || 'N/A'}). Non inclusa nel matching automatico.`;
+        
+        debugLog('status', `Foreign ADE row`, {
+          num: a.num,
+          den: a.den,
+          piva: a.piva,
+          isForeign: true,
+          status: "SOLO_ADE"
+        });
+        
+        results.push({
+          ADE: a,
+          GEST: null,
+          STATUS: "SOLO_ADE",
+          CRITERIO: "FOREIGN_PIVA",
+          NOTE_MATCH: note,
+          ORIGINE: "SOLO_ADE",
+          DIFF_TOTALE: 0
         });
       }
     }
@@ -3387,6 +3486,57 @@ function matchRecords(adeList, gestList) {
         r.ORIGINE = "UNKNOWN";
       }
     }
+
+    // ============================================================
+    // 🔍 INTEGRITY CHECK: Classification Coverage (Dic 2025)
+    // ============================================================
+    // Verify that every ADE row has explicit status and all rows are accounted for
+    // Requirement: total ADE rows read == matched + unmatched + multi_match
+    
+    const totalAdeInput = adeList.length;  // Including foreign rows
+    const totalAdeFiltered = ade.length;   // Excluding foreign rows (isForeign)
+    const foreignAdeCount = adeList.filter(r => r.isForeign).length;
+    const totalGestInput = gestList.length;
+    const totalGestFiltered = gest.length;
+    
+    // Count results by status
+    const matchedCount = results.filter(r => r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX").length;
+    const unmatchedAdeCount = results.filter(r => r.STATUS === "SOLO_ADE").length;
+    const unmatchedGestCount = results.filter(r => r.STATUS === "SOLO_GEST").length;
+    const multiMatchCount = 0;  // Not implemented yet but reserved for future
+    
+    // Total results should equal ALL ADE rows (including foreign) + unmatched GEST rows
+    const totalResults = results.length;
+    const expectedResults = totalAdeInput + unmatchedGestCount;  // All ADE + unmatched GEST
+    
+    console.log("📊 ========== CLASSIFICATION COVERAGE REPORT ==========");
+    console.log(`📥 INPUT: ADE rows = ${totalAdeInput} (domestic=${totalAdeFiltered}, foreign=${foreignAdeCount})`);
+    console.log(`📥 INPUT: GEST rows = ${totalGestInput} (domestic=${totalGestFiltered}, foreign=${totalGestInput - totalGestFiltered})`);
+    console.log(`✅ MATCHED (MATCH_OK + MATCH_FIX): ${matchedCount}`);
+    console.log(`❌ UNMATCHED ADE (SOLO_ADE): ${unmatchedAdeCount} (includes ${foreignAdeCount} foreign)`);
+    console.log(`❌ UNMATCHED GEST (SOLO_GEST): ${unmatchedGestCount}`);
+    console.log(`⚠️ MULTI-MATCH: ${multiMatchCount}`);
+    console.log(`📊 TOTAL RESULTS: ${totalResults}`);
+    console.log(`🔢 EXPECTED: ${expectedResults} (${totalAdeInput} ADE all + ${unmatchedGestCount} unmatched GEST)`);
+    
+    // Verify integrity: Every ADE row (including foreign) should appear in results
+    const adeInResults = matchedCount + (unmatchedAdeCount - foreignAdeCount); // Domestic ADE in results
+    const totalAdeInResults = adeInResults + foreignAdeCount;  // All ADE in results
+    
+    if (totalAdeInResults !== totalAdeInput) {
+      console.error(`❌ INTEGRITY ERROR: ADE rows in results (${totalAdeInResults}) != Total ADE input (${totalAdeInput})`);
+      console.error(`   Matched: ${matchedCount}, Unmatched domestic: ${unmatchedAdeCount - foreignAdeCount}, Foreign: ${foreignAdeCount}, Total: ${totalAdeInput}`);
+      console.error(`   Difference: ${Math.abs(totalAdeInResults - totalAdeInput)} rows missing!`);
+    } else {
+      console.log(`✅ INTEGRITY CHECK PASSED: All ${totalAdeInput} ADE rows accounted for (${totalAdeFiltered} domestic + ${foreignAdeCount} foreign)`);
+    }
+    
+    // Check if total results make sense
+    if (totalResults !== expectedResults) {
+      console.warn(`⚠️ WARNING: Total results (${totalResults}) != Expected (${expectedResults}). Difference: ${totalResults - expectedResults}`);
+    }
+    
+    console.log("📊 ====================================================");
 
     return results;
   }
