@@ -3767,13 +3767,42 @@ function matchRecords(adeList, gestList) {
 
     const full = fullResultsForCounts || resultsToRender;
 
-    let cntOk = 0, cntFix = 0, cntAde = 0, cntGest = 0;
+    // Enhanced classification counts
+    let cntOk = 0, cntFix = 0, cntAde = 0, cntGest = 0, cntManual = 0;
+    let cntAdeMatched = 0, cntAdeUnmatched = 0;
+    
     for (const row of full) {
       if (row.deleted) continue;
-      if (row.STATUS === "MATCH_OK") cntOk++;
-      else if (row.STATUS === "MATCH_FIX") cntFix++;
-      else if (row.STATUS === "SOLO_ADE") cntAde++;
-      else if (row.STATUS === "SOLO_GEST") cntGest++;
+      
+      if (row.STATUS === "MATCH_OK") {
+        cntOk++;
+        if (row.ADE) cntAdeMatched++;
+      }
+      else if (row.STATUS === "MATCH_FIX") {
+        cntFix++;
+        if (row.ADE) cntAdeMatched++;
+      }
+      else if (row.STATUS === "MANUAL_MATCH") {
+        cntManual++;
+        if (row.ADE) cntAdeMatched++;
+      }
+      else if (row.STATUS === "SOLO_ADE") {
+        cntAde++;
+        if (row.ADE) cntAdeUnmatched++;
+      }
+      else if (row.STATUS === "SOLO_GEST") {
+        cntGest++;
+      }
+    }
+    
+    // Log classification summary
+    if (DEBUG_CONFIG.ADE_DEBUG_ENABLED) {
+      console.log(`\n📊 ===== ADE Classification Summary =====`);
+      console.log(`   ✅ ADE Matched: ${cntAdeMatched} (OK: ${cntOk}, FIX: ${cntFix}, MANUAL: ${cntManual})`);
+      console.log(`   ❌ ADE Unmatched: ${cntAdeUnmatched}`);
+      console.log(`   🔵 GEST Solo: ${cntGest}`);
+      console.log(`   📊 Total ADE in results: ${cntAdeMatched + cntAdeUnmatched}`);
+      console.log(`===== End Classification Summary =====\n`);
     }
 
     for (const row of resultsToRender) {
@@ -3898,6 +3927,14 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     document.getElementById("cntFix").textContent = cntFix;
     document.getElementById("cntAde").textContent = cntAde;
     document.getElementById("cntGest").textContent = cntGest;
+    
+    // Show manual match chip only if there are manual matches
+    const chipManual = document.getElementById("chipManual");
+    const cntManualEl = document.getElementById("cntManual");
+    if (chipManual && cntManualEl) {
+      cntManualEl.textContent = cntManual;
+      chipManual.style.display = cntManual > 0 ? "flex" : "none";
+    }
 
     // ============================================================
     // ANALISI GUIDATA SOLO GESTIONALE (Miglioramento Dic 2025)
@@ -3953,10 +3990,18 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     const adeCount = totalAdeCount || (lastAdeRecords?.length ?? 0);
     const gestCount = totalGestCount || (lastGestRecords?.length ?? 0);
 
+    // Build status text with classification counts
+    let statusParts = `OK: ${cntOk}, Da correggere: ${cntFix}`;
+    if (cntManual > 0) {
+      statusParts += `, Manuali: ${cntManual}`;
+    }
+    statusParts += `, Solo ADE: ${cntAde}, Solo Gest.: ${cntGest}`;
+    
     document.getElementById("statusText").textContent =
       `Confronto completato: ${total} righe attive ` +
-      `(OK: ${cntOk}, Da correggere: ${cntFix}, Solo ADE: ${cntAde}, Solo Gest.: ${cntGest}) ` +
-      `| Fatture ADE caricate: ${adeCount} | Righe gestionali caricate: ${gestCount}`;
+      `(${statusParts}) ` +
+      `| ADE: ${adeCount} (Matched: ${cntAdeMatched}, Unmatched: ${cntAdeUnmatched}) ` +
+      `| Gestionale: ${gestCount}`;
     
     // Attiva il ridimensionamento sulla tabella appena renderizzata
     const tableEl = document.getElementById("resultTable");
