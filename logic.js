@@ -73,6 +73,20 @@ window.addEventListener("DOMContentLoaded", () => {
   };
 
   // ============================================================
+  // 🔍 DEBUG CONFIGURATION (ADE Processing)
+  // ============================================================
+  const DEBUG_CONFIG = {
+    // Enable/disable debug logging for ADE records
+    ADE_DEBUG_ENABLED: false,        // Set to true to enable detailed ADE logging
+    ADE_DEBUG_SAMPLE_SIZE: 10,       // Number of first ADE rows to log in detail
+    
+    // Debug flags for specific scenarios
+    LOG_ADE_PARSING: false,          // Log each ADE record as it's parsed
+    LOG_ADE_MATCHING: false,         // Log ADE matching decisions
+    LOG_ADE_AMOUNTS: false           // Log amount calculations
+  };
+
+  // ============================================================
   // 📊 STATO GLOBALE APPLICAZIONE
   // ============================================================
   let lastAdeRecords = [];
@@ -1834,6 +1848,12 @@ function formatDateForUI(dateObj) {
   }
   
   const colTipo  = findCol(H, h, "tipo documento");
+  
+  // Try to find totale column in ADE (might not exist, but check)
+  let colTot = cfg.tot;
+  if (!colTot) {
+    colTot = findCol(H, h, "totale documento", "totale fattura", "totale", "importo totale");
+  }
 
   // 🔍 DEBUG: Log mapping colonne per diagnostica
   console.log("📋 MAPPING FINALE COLONNE ADE:");
@@ -1843,6 +1863,7 @@ function formatDateForUI(dateObj) {
   console.log(`   Denominazione: "${colDenFor}"`);
   console.log(`   ⭐ Imponibile: "${colImp}"`);
   console.log(`   ⭐ IVA: "${colIva}"`);
+  console.log(`   ⭐ Totale: "${colTot || '(non presente - verrà calcolato)'}"`);
   console.log(`   Tipo Documento: "${colTipo}"`);
 
   updateColumnConfig("ADE", {
@@ -1851,7 +1872,8 @@ function formatDateForUI(dateObj) {
     piva: colPivaFor || colPivaCli,
     den: colDenFor,
     imp: colImp,
-    iva: colIva
+    iva: colIva,
+    tot: colTot
   });
 
   const recs = [];
@@ -1877,59 +1899,20 @@ function formatDateForUI(dateObj) {
     const data = parseDateFlexible(dataIso);                   // Oggetto Date per confronti (usa ISO già normalizzato)
     const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
-    // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
+    // ===== GESTIONE IMPORTI - IMMUTABILI (NO AUTO-FIX) =====
+    // ADE amounts MUST remain exactly as read from the file
     let impRaw = r[colImp] || "";
     let ivaRaw = r[colIva] || "";
+    let totRaw = r[colTot] || "";  // Read totale if column exists
     
-    // 🔧 AUTO-FIX PRE-PARSING (versione prudente)
-    if (
-      colImp && colData &&
-      colImp === colData &&
-      impRaw &&
-      String(impRaw).includes("/") &&
-      String(impRaw).match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
-    ) {
-      console.warn(`⚠️ ADE [${num}]: Imponibile contiene una DATA ("${impRaw}") sulla stessa colonna della data. Provo a cercare l'importo corretto...`);
-
-      let foundValue = null;
-      let foundCol = null;
-
-      for (let i = 0; i < H.length; i++) {
-        const colName = H[i];
-        const val = r[colName] || "";
-
-        if (String(val).includes("/")) continue;
-        if (String(val).length === 11 && !isNaN(val)) continue;
-
-        const lowerName = colName.toLowerCase();
-        if (lowerName.includes("data")) continue;
-        if (lowerName.includes("partita")) continue;
-        if (lowerName.includes("codice")) continue;
-
-        const numVal = parseNumberIT(val);
-        if (numVal >= 1 && numVal < 999999) {
-          foundValue = numVal;
-          foundCol = colName;
-          break;
-        }
-      }
-
-      if (foundValue !== null) {
-        console.log(`   ✅ CORRETTO IMPONIBILE ADE: uso ${foundValue} € da colonna "${foundCol}"`);
-        impRaw = String(foundValue);
-      } else {
-        console.error(`   ❌ Nessun valore numerico imponibile trovato nella riga ADE. Lascio imponibile = 0`);
-        impRaw = "0";
-      }
-    }
-
-    // 🔍 DEBUG: Log valori grezzi (DOPO auto-fix se necessario)
+    // 🔍 DEBUG: Log valori grezzi
     if (num === "2528012466" || String(num).includes("2528012466")) {
       console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE:`);
       console.log(`   📊 Colonna Imponibile: "${colImp}"`);
-      console.log(`   📊 Valore grezzo (dopo auto-fix): "${impRaw}"`);
+      console.log(`   📊 Valore grezzo: "${impRaw}"`);
       console.log(`   📊 Colonna IVA: "${colIva}"`);
       console.log(`   📊 Valore grezzo IVA: "${ivaRaw}"`);
+      console.log(`   📊 Valore grezzo Totale: "${totRaw}"`);
       
       // Mostra TUTTA la riga
       console.log(`   📋 RIGA COMPLETA:`, r);
@@ -1938,23 +1921,24 @@ function formatDateForUI(dateObj) {
       });
     }
     
-    // ORA fai il parsing con il valore corretto
+    // Parse amounts EXACTLY as read - NO MODIFICATIONS
     let imp = parseNumberIT(impRaw);
     let iva = cleanIVAValue(ivaRaw, piva);
-    let tot = +(imp + iva).toFixed(2);
+    let tot = parseNumberIT(totRaw);
     
-    // 🔍 DEBUG: Valori dopo parsing
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
+    // ⚠️ CRITICAL: Only derive totale when missing or zero
+    // Never overwrite an existing non-zero total
+    if (!tot || tot === 0) {
+      if (imp > 0 || iva > 0) {
+        tot = +(imp + iva).toFixed(2);
+        console.log(`ℹ️ ADE [${num}]: Totale calcolato da imp+iva: ${tot}`);
+      }
     }
     
-    // ✅ VALIDAZIONE IMPORTI
-    const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
-    tot = validated.tot;
-    
-    // 🔍 DEBUG FINALE: Valori nel record
+    // 🔍 DEBUG: Valori dopo parsing (NO validation/fix)
     if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ RECORD FINALE: imp=${imp}, iva=${iva}, tot=${tot}`);
+      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
+      console.log(`   ⚠️ IMPORTANTE: Nessuna modifica ai valori ADE - mantenu immutabili`);
       console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
@@ -1978,6 +1962,30 @@ function formatDateForUI(dateObj) {
       tipoDoc,
       isForeign: isForeignPiva(piva)
     });
+  }
+
+  // ============================================================
+  // 🔍 DEBUG: Log first N ADE records if debug enabled
+  // ============================================================
+  if (DEBUG_CONFIG.ADE_DEBUG_ENABLED && recs.length > 0) {
+    const sampleSize = Math.min(DEBUG_CONFIG.ADE_DEBUG_SAMPLE_SIZE, recs.length);
+    console.log(`\n🔍 ===== DEBUG ADE: Mostrando primi ${sampleSize} record =====`);
+    
+    for (let i = 0; i < sampleSize; i++) {
+      const rec = recs[i];
+      console.log(`\n📋 ADE Record #${i + 1}:`);
+      console.log(`   Numero: "${rec.num}" (digits: "${rec.numDigits}")`);
+      console.log(`   Denominazione: "${rec.den}" (norm: "${rec.denNorm}")`);
+      console.log(`   P.IVA: "${rec.piva}" (digits: "${rec.pivaDigits}")`);
+      console.log(`   Data: ${rec.dataStr} (ISO: ${rec.dataIso})`);
+      console.log(`   ⭐ IMPORTI IMMUTABILI:`);
+      console.log(`      Imponibile: ${rec.imp}`);
+      console.log(`      IVA: ${rec.iva}`);
+      console.log(`      Totale: ${rec.tot}`);
+      console.log(`   Tipo Doc: ${rec.tipoDoc || 'N/A'}`);
+      console.log(`   Estero: ${rec.isForeign ? 'SI' : 'NO'}`);
+    }
+    console.log(`\n🔍 ===== Fine debug ADE - Totale record: ${recs.length} =====\n`);
   }
 
   return recs;
@@ -3387,6 +3395,45 @@ function matchRecords(adeList, gestList) {
         r.ORIGINE = "UNKNOWN";
       }
     }
+
+    // ============================================================
+    // 🔍 INTEGRITY CHECK: Full Classification Coverage
+    // ============================================================
+    // Every ADE row must have a status: matched | unmatched | multi_match
+    // This includes foreign rows (isForeign) which should be at least unmatched
+    const adeInputCount = adeList.length;
+    const adeWithStatus = results.filter(r => r.ADE !== null);
+    const matched = results.filter(r => r.ADE && r.GEST && (r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX"));
+    const unmatched = results.filter(r => r.ADE && !r.GEST && r.STATUS === "SOLO_ADE");
+    
+    // Note: multi_match would need to be tracked separately if we support multiple matches per ADE row
+    // For now we assume each ADE row appears at most once in results
+    const adeInResults = adeWithStatus.length;
+    
+    console.log(`\n🔍 ===== INTEGRITY CHECK: ADE Classification Coverage =====`);
+    console.log(`   📥 ADE Input Count: ${adeInputCount}`);
+    console.log(`   📊 ADE in Results: ${adeInResults}`);
+    console.log(`   ✅ Matched (MATCH_OK + MATCH_FIX): ${matched.length}`);
+    console.log(`   ❌ Unmatched (SOLO_ADE): ${unmatched.length}`);
+    console.log(`   🌍 Foreign rows (included in counts): ${adeList.filter(a => a.isForeign).length}`);
+    
+    if (adeInputCount !== adeInResults) {
+      console.error(`\n❌ INTEGRITY ERROR: ADE count mismatch!`);
+      console.error(`   Expected: ${adeInputCount} ADE rows`);
+      console.error(`   Found in results: ${adeInResults} ADE rows`);
+      console.error(`   Missing: ${adeInputCount - adeInResults} ADE rows`);
+      console.error(`   This indicates a bug in the matching logic!`);
+      
+      // Find missing ADE rows
+      const adeInResultsSet = new Set(results.filter(r => r.ADE).map(r => r.ADE.idx));
+      const missingAde = adeList.filter(a => !adeInResultsSet.has(a.idx));
+      if (missingAde.length > 0) {
+        console.error(`   📋 Missing ADE rows (first 5):`, missingAde.slice(0, 5));
+      }
+    } else {
+      console.log(`   ✅ INTEGRITY OK: All ${adeInputCount} ADE rows classified`);
+    }
+    console.log(`===== End Integrity Check =====\n`);
 
     return results;
   }
