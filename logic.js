@@ -1771,6 +1771,9 @@ function formatDateForUI(dateObj) {
   function buildAdeRecords(parsed) {
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
+  
+  // Debug configuration: how many rows to log in detail
+  const DEBUG_FIRST_N_ROWS = 3;
 
   // 🔍 DEBUG: Stampa TUTTE le colonne del file ADE
   console.log("🔥🔥🔥 ===== INIZIO DEBUG FILE ADE ===== 🔥🔥🔥");
@@ -1913,10 +1916,9 @@ function formatDateForUI(dateObj) {
     const ivaRaw = r[colIva] || "";
     const totRaw = colTot ? (r[colTot] || "") : "";
     
-    // 🔍 DEBUG: Log valori grezzi VERBATIM dal file ADE (only for first 3 rows)
+    // 🔍 DEBUG: Log valori grezzi VERBATIM dal file ADE (only for first N rows)
     // This debug mode helps troubleshoot parsing issues without cluttering logs
-    const debugFirstNRows = 3;
-    if (recs.length < debugFirstNRows) {
+    if (recs.length < DEBUG_FIRST_N_ROWS) {
       console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE VERBATIM:`);
       console.log(`   📊 Colonna Imponibile: "${colImp}"`);
       console.log(`   📊 Valore grezzo: "${impRaw}"`);
@@ -1936,8 +1938,11 @@ function formatDateForUI(dateObj) {
     // Altrimenti calcola come round(imp + iva, 2)
     let tot;
     // Check if totRaw is actually provided (not null/undefined/empty string)
-    // A legitimate zero total would be "0" or "0.00" in the file
-    const hasTotaleColumn = totRaw && totRaw.toString().trim() !== "";
+    // A legitimate zero total would be "0" or "0.00" in the file (string)
+    // Must check for null/undefined separately to handle number 0 correctly
+    const hasTotaleColumn = totRaw !== null && 
+                           totRaw !== undefined && 
+                           totRaw.toString().trim() !== "";
     if (hasTotaleColumn) {
       // Totale present in ADE file - use verbatim (even if zero)
       tot = parseNumberIT(totRaw);
@@ -1948,8 +1953,8 @@ function formatDateForUI(dateObj) {
       console.log(`   ℹ️ ADE [${num}]: Totale calcolato (imp+iva): ${tot}`);
     }
     
-    // 🔍 DEBUG: Valori dopo parsing IMMUTABILE (only for first 3 rows)
-    if (recs.length < debugFirstNRows) {
+    // 🔍 DEBUG: Valori dopo parsing IMMUTABILE (only for first N rows)
+    if (recs.length < DEBUG_FIRST_N_ROWS) {
       console.log(`   ✅ VALORI FINALI (IMMUTABILI): imp=${imp}, iva=${iva}, tot=${tot}`);
     }
     
@@ -2633,13 +2638,26 @@ function classifyMatchNote(diffTotale, adeRecord, gestRecord, ncInfo, criterio) 
 }
 
 function matchRecords(adeList, gestList) {
-  const ade = adeList
-    .filter(r => !r.isForeign)    // <-- niente P.IVA estera ADE
-    .map((r, idx) => ({ idx, ...r }));
+  // Separate foreign and domestic records in one pass for efficiency
+  const ade = [];
+  const foreignAde = [];
+  adeList.forEach((r, idx) => {
+    if (r.isForeign) {
+      foreignAde.push(r);
+    } else {
+      ade.push({ idx, ...r });
+    }
+  });
 
-  const gest = gestList
-    .filter(r => !r.isForeign)    // <-- niente P.IVA estera Gest
-    .map((r, idx) => ({ idx, ...r }));
+  const gest = [];
+  const foreignGest = [];
+  gestList.forEach((r, idx) => {
+    if (r.isForeign) {
+      foreignGest.push(r);
+    } else {
+      gest.push({ idx, ...r });
+    }
+  });
 
   const matchedAde = new Set();
   const matchedGest = new Set();
@@ -3360,12 +3378,9 @@ function matchRecords(adeList, gestList) {
     // REQUISITO: Includere tutte le righe isForeign con status esplicito
     // Non skippare mai nessuna riga - assegnare sempre uno stato
     // 
-    // NOTA: Le righe foreign sono state filtrate fuori dagli array ade/gest
-    // all'inizio della funzione (lines 2639-2642), quindi non sono mai
-    // entrate nel matching e non possono essere duplicate qui.
+    // NOTA: Le righe foreign sono state separate all'inizio della funzione
+    // (foreignAde e foreignGest arrays), quindi sono già pronte da usare qui.
     // ============================================================
-    const foreignAde = adeList.filter(r => r.isForeign);
-    const foreignGest = gestList.filter(r => r.isForeign);
     
     for (const a of foreignAde) {
       results.push({
