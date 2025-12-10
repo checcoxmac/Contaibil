@@ -837,7 +837,7 @@ function formatDateForUI(dateObj) {
       // Per ADE: mantieni imp e iva esattamente come letti dal file
       // Calcola totale SOLO se mancante/nullo/zero
       if (!tot || tot === 0) {
-        const calculatedTot = +(imp + iva).toFixed(2);
+        const calculatedTot = Number((imp + iva).toFixed(2));
         if (imp !== 0 || iva !== 0) {
           console.log(`ℹ️ ADE [${docId}]: Totale mancante - calcolato da imp+iva: ${calculatedTot}`);
           fixed.tot = calculatedTot;
@@ -845,7 +845,7 @@ function formatDateForUI(dateObj) {
       }
       // Se totale esiste, log diagnostico ma NON modificare
       else {
-        const expectedTot = +(imp + iva).toFixed(2);
+        const expectedTot = Number((imp + iva).toFixed(2));
         if (Math.abs(tot - expectedTot) > 0.50) {
           console.warn(`⚠️ ADE [${docId}]: Discrepanza importi (mantenuto valore originale ADE)`);
           console.warn(`   Imponibile ADE: ${imp}`);
@@ -860,7 +860,7 @@ function formatDateForUI(dateObj) {
     
     // Per GESTIONALE: logica originale con validazione e fix
     // 1. Calcola il totale atteso
-    const expectedTot = +(imp + iva).toFixed(2);
+    const expectedTot = Number((imp + iva).toFixed(2));
     
     // 2. Se il totale è mancante o zero, calcolalo
     if (!tot || tot === 0) {
