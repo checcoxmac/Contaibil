@@ -19,6 +19,54 @@
       </div>
     </div>
   </div>
+  <!-- Mobile Hamburger Button -->
+  <button id="mobileMenuToggle" class="mobile-menu-toggle" aria-label="Menu">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+
+  <!-- Mobile Sidebar -->
+  <div id="mobileSidebar" class="mobile-sidebar">
+    <div class="mobile-sidebar-header">
+      <div class="app-logo">
+        <div class="app-logo-inner">CA</div>
+      </div>
+      <h2>ContAIbil</h2>
+      <button id="closeMobileSidebar" class="close-sidebar-btn" aria-label="Chiudi">✕</button>
+    </div>
+    <nav class="mobile-nav">
+      <a href="#" data-section="section-recon" class="mobile-nav-item active">
+        <span class="mobile-nav-icon">📊</span>
+        <span>Riconciliazione</span>
+      </a>
+      <a href="#" data-section="section-analysis" class="mobile-nav-item">
+        <span class="mobile-nav-icon">📈</span>
+        <span>Analisi Fornitori</span>
+      </a>
+      <a href="#" data-section="section-dashboard" class="mobile-nav-item">
+        <span class="mobile-nav-icon">📉</span>
+        <span>Dashboard</span>
+      </a>
+      <a href="#" data-section="section-vat" class="mobile-nav-item">
+        <span class="mobile-nav-icon">💰</span>
+        <span>Liquidazione IVA</span>
+      </a>
+      <div class="mobile-nav-divider"></div>
+      <a href="#" id="mobileLoadFile" class="mobile-nav-item">
+        <span class="mobile-nav-icon">📁</span>
+        <span>Carica File Excel</span>
+      </a>
+      <a href="#" id="mobileSettings" class="mobile-nav-item">
+        <span class="mobile-nav-icon">⚙️</span>
+        <span>Impostazioni</span>
+      </a>
+    </nav>
+  </div>
+
+  <!-- Mobile Sidebar Overlay -->
+  <div id="mobileSidebarOverlay" class="mobile-sidebar-overlay"></div>
+
   <div class="app-container">
     <!-- HEADER -->
     <div class="topbar">
@@ -40,13 +88,16 @@
           </div>
         </div>
         <div class="topbar-right">
-          <button id="btnWideMode" class="btn-topbar-icon" title="Passare a modalità a schermo intero (nascondi sidebar)">
+          <button id="btnViewToggle" class="btn-topbar-icon mobile-only" title="Cambia vista tabella/card">
+            <span>🃏</span>
+          </button>
+          <button id="btnWideMode" class="btn-topbar-icon desktop-only" title="Passare a modalità a schermo intero (nascondi sidebar)">
             <span>⛶</span>
           </button>
-          <button id="btnCompactMode" class="btn-topbar-icon" title="Attiva vista compatta (tipo Excel)">
+          <button id="btnCompactMode" class="btn-topbar-icon desktop-only" title="Attiva vista compatta (tipo Excel)">
             <span>🗋</span>
           </button>
-          <div class="pill-env">
+          <div class="pill-env desktop-only">
             <span class="pill-dot"></span>
             <span>Workspace Fatture Acquisto</span>
           </div>
@@ -187,7 +238,7 @@
             <div class="card">
                <div class="actions-row">
                  <div class="actions-left">
-                   <button id="btnMatch" class="btn btn-primary">
+                   <button id="btnMatch" class="btn btn-primary" title="L'AI analizzerà automaticamente i file per errori, duplicati e inconsistenze">
                      <span class="btn-icon">⚙️</span>
                      Confronta fatture
                    </button>
@@ -743,7 +794,7 @@
     <!-- Libreria per leggere XLSX -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- Script principale -->
-  <script src="logic.js"></script>
+  <script src="script.js"></script>
 
 </body>
 </html>

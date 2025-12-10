@@ -6,6 +6,417 @@ console.log("✅ Fix CA Bank quote handling attivo");
 console.log("✅ Debug logging completo attivo");
 
 window.addEventListener("DOMContentLoaded", () => {
+  // ============================================================
+  // 📱 MOBILE MENU & NAVIGATION
+  // ============================================================
+  const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+  const mobileSidebar = document.getElementById('mobileSidebar');
+  const mobileSidebarOverlay = document.getElementById('mobileSidebarOverlay');
+  const closeMobileSidebar = document.getElementById('closeMobileSidebar');
+  const mobileNavItems = document.querySelectorAll('.mobile-nav-item[data-section]');
+
+  function openMobileSidebar() {
+    mobileSidebar?.classList.add('active');
+    mobileSidebarOverlay?.classList.add('active');
+    mobileMenuToggle?.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeMobileSidebarFn() {
+    mobileSidebar?.classList.remove('active');
+    mobileSidebarOverlay?.classList.remove('active');
+    mobileMenuToggle?.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  mobileMenuToggle?.addEventListener('click', () => {
+    if (mobileSidebar?.classList.contains('active')) {
+      closeMobileSidebarFn();
+    } else {
+      openMobileSidebar();
+    }
+  });
+
+  closeMobileSidebar?.addEventListener('click', closeMobileSidebarFn);
+  mobileSidebarOverlay?.addEventListener('click', closeMobileSidebarFn);
+
+  // Mobile navigation handling
+  mobileNavItems.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetSection = item.dataset.section;
+      
+      // Update active state
+      mobileNavItems.forEach(nav => nav.classList.remove('active'));
+      item.classList.add('active');
+      
+      // Trigger desktop nav click
+      const desktopNav = document.querySelector(`.nav-tab[data-section="${targetSection}"]`);
+      if (desktopNav) {
+        desktopNav.click();
+      }
+      
+      // Close sidebar after navigation
+      closeMobileSidebarFn();
+    });
+  });
+
+  // ============================================================
+  // 🃏 MOBILE CARD VIEW TOGGLE
+  // ============================================================
+  const btnViewToggle = document.getElementById('btnViewToggle');
+  let isCardView = localStorage.getItem('contaibl-card-view') === 'true';
+
+  if (isCardView && window.innerWidth <= 768) {
+    document.body.classList.add('card-view-active');
+  }
+
+  btnViewToggle?.addEventListener('click', () => {
+    isCardView = !isCardView;
+    document.body.classList.toggle('card-view-active', isCardView);
+    localStorage.setItem('contaibl-card-view', isCardView);
+    
+    // Regenerate card view if active
+    if (isCardView) {
+      generateCardView();
+    }
+  });
+
+  // Function to generate card view from table data
+  function generateCardView() {
+    const tableWrapper = document.getElementById('tableContainer');
+    if (!tableWrapper) return;
+
+    let cardContainer = document.querySelector('.table-card-view');
+    if (!cardContainer) {
+      cardContainer = document.createElement('div');
+      cardContainer.className = 'table-card-view';
+      tableWrapper.parentNode.insertBefore(cardContainer, tableWrapper.nextSibling);
+    }
+
+    cardContainer.innerHTML = '';
+
+    // Get visible rows from current filter
+    const visibleRows = lastResults.filter(r => {
+      if (r.deleted) return false;
+      if (currentFilter === 'ALL') return true;
+      return r.STATUS === currentFilter;
+    });
+
+    visibleRows.forEach(row => {
+      const card = createCardFromRow(row);
+      cardContainer.appendChild(card);
+    });
+  }
+
+  function createCardFromRow(row) {
+    const card = document.createElement('div');
+    card.className = 'card-item';
+    card.dataset.rowId = row.rowId;
+    
+    const statusClass = row.STATUS === 'MATCH_OK' ? 'pill-ok' : 
+                       row.STATUS === 'MATCH_FIX' ? 'pill-fix' :
+                       row.STATUS === 'SOLO_ADE' ? 'pill-ade' : 
+                       row.STATUS === 'SOLO_GEST' ? 'pill-gest' : '';
+
+    const a = row.ADE;
+    const g = row.GEST;
+
+    // Make card clickable if it's editable
+    const isClickable = row.STATUS === 'MATCH_FIX' || row.STATUS === 'SOLO_GEST' || row.STATUS === 'MANUAL_MATCH' || row.STATUS === 'SOLO_ADE';
+    if (isClickable) {
+      card.classList.add('clickable');
+    }
+
+    let cardContent = `
+      <div class="card-item-header">
+        <div class="card-item-title">${a ? a.den || g?.den || 'N/D' : g?.den || 'N/D'}</div>
+        <div class="card-item-status status-pill ${statusClass}">${row.STATUS}</div>
+      </div>
+      <div class="card-item-body">
+    `;
+
+    // ADE Section
+    if (a) {
+      cardContent += `
+        <div class="card-item-section">
+          <div class="card-item-section-title">📊 Dati ADE</div>
+          <div class="card-item-row">
+            <span class="card-item-label">Numero:</span>
+            <span class="card-item-value">${a.num || 'N/D'}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Data:</span>
+            <span class="card-item-value">${a.dataStr || formatDateIT(a.data) || 'N/D'}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">P.IVA:</span>
+            <span class="card-item-value">${a.piva || 'N/D'}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Imponibile:</span>
+            <span class="card-item-value">${formatNumberITDisplay(a.imp)}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">IVA:</span>
+            <span class="card-item-value">${formatNumberITDisplay(a.iva)}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Totale:</span>
+            <span class="card-item-value" style="font-weight: 600;">${formatNumberITDisplay(a.tot)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Gestionale Section
+    if (g) {
+      cardContent += `
+        <div class="card-item-section">
+          <div class="card-item-section-title">🏢 Dati Gestionale</div>
+          <div class="card-item-row">
+            <span class="card-item-label">Numero:</span>
+            <span class="card-item-value">${g.num || 'N/D'}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Data:</span>
+            <span class="card-item-value">${g.dataStr || formatDateIT(g.data) || 'N/D'}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Imponibile:</span>
+            <span class="card-item-value">${formatNumberITDisplay(g.imp)}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">IVA:</span>
+            <span class="card-item-value">${formatNumberITDisplay(g.iva)}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Totale:</span>
+            <span class="card-item-value" style="font-weight: 600;">${formatNumberITDisplay(g.tot)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Criterio section if available
+    if (row.CRITERIO) {
+      cardContent += `
+        <div class="card-item-section">
+          <div class="card-item-section-title">ℹ️ Informazioni Match</div>
+          <div class="card-item-row">
+            <span class="card-item-value" style="font-size: 0.75rem; text-align: left; max-width: 100%; white-space: normal;">${row.CRITERIO}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    cardContent += `</div>`; // Close card-item-body
+
+    card.innerHTML = cardContent;
+
+    // Add click handler for editing
+    if (isClickable) {
+      card.addEventListener('click', () => {
+        openEditPanel(row.rowId);
+      });
+    }
+
+    return card;
+  }
+
+  // ============================================================
+  // 🤖 AI-POWERED EXCEL ANALYSIS - CONFIGURATION
+  // ============================================================
+  // These thresholds can be adjusted based on your needs
+  const AI_ANALYSIS_CONFIG = {
+    emptyCellThreshold: 0.3,     // 30% empty cells triggers warning
+    duplicateThreshold: 2,        // More than 2 duplicates triggers warning
+    mismatchThreshold: 0.05,      // 5% tolerance for amount mismatches (€0.05)
+    mismatchPercentage: 0.01,     // 1% percentage tolerance
+    maxErrorsToShow: 3,           // Max errors to display in alert
+    maxWarningsToShow: 2,         // Max warnings to display in alert
+    maxSuggestionsToShow: 2,      // Max suggestions to display in alert
+    alertDisplayDuration: 15000,  // Auto-hide alert after 15 seconds
+  };
+
+  function analyzeExcelData(records, type) {
+    const analysis = {
+      warnings: [],
+      errors: [],
+      suggestions: [],
+      emptyCells: [],
+      duplicates: [],
+      inconsistencies: [],
+    };
+
+    if (!records || records.length === 0) {
+      return analysis;
+    }
+
+    // 1. Check for empty cells
+    const totalFields = records.length * Object.keys(records[0]).length;
+    let emptyCount = 0;
+
+    records.forEach((record, idx) => {
+      const emptyFields = [];
+      Object.entries(record).forEach(([key, value]) => {
+        if (!value || String(value).trim() === '') {
+          emptyCount++;
+          emptyFields.push(key);
+        }
+      });
+
+      if (emptyFields.length > 0) {
+        analysis.emptyCells.push({
+          row: idx + 1,
+          fields: emptyFields,
+          severity: emptyFields.length > 3 ? 'high' : 'medium'
+        });
+      }
+    });
+
+    if (emptyCount / totalFields > AI_ANALYSIS_CONFIG.emptyCellThreshold) {
+      analysis.warnings.push(`⚠️ ${type}: Troppe celle vuote (${Math.round(emptyCount / totalFields * 100)}% del totale)`);
+    }
+
+    // 2. Check for duplicates (based on invoice number)
+    const invoiceNumbers = new Map();
+    records.forEach((record, idx) => {
+      const num = record.num || record.ADE_Num || record.GEST_Num;
+      if (num) {
+        const normalized = normalizeInvoiceNumber(num, false);
+        if (!invoiceNumbers.has(normalized)) {
+          invoiceNumbers.set(normalized, []);
+        }
+        invoiceNumbers.get(normalized).push({ idx: idx + 1, original: num });
+      }
+    });
+
+    invoiceNumbers.forEach((occurrences, num) => {
+      if (occurrences.length >= AI_ANALYSIS_CONFIG.duplicateThreshold) {
+        analysis.duplicates.push({
+          invoiceNumber: num,
+          occurrences: occurrences,
+          count: occurrences.length
+        });
+        analysis.errors.push(`❌ ${type}: Numero fattura "${num}" duplicato ${occurrences.length} volte`);
+      }
+    });
+
+    // 3. Check for inconsistencies (imp + iva != tot)
+    records.forEach((record, idx) => {
+      const imp = parseNumberIT(record.imp || record.ADE_Imponibile || record.GEST_Imponibile || 0);
+      const iva = parseNumberIT(record.iva || record.ADE_Iva || record.GEST_Iva || 0);
+      const tot = parseNumberIT(record.tot || record.ADE_Totale || record.GEST_Totale || 0);
+
+      if (imp > 0 || iva > 0 || tot > 0) {
+        const expectedTot = imp + iva;
+        const diff = Math.abs(tot - expectedTot);
+
+        if (diff > AI_ANALYSIS_CONFIG.mismatchThreshold && diff / tot > AI_ANALYSIS_CONFIG.mismatchPercentage) {
+          analysis.inconsistencies.push({
+            row: idx + 1,
+            expected: expectedTot,
+            actual: tot,
+            diff: diff
+          });
+          analysis.errors.push(`❌ ${type} riga ${idx + 1}: Totale non corrisponde (atteso: ${formatNumberITDisplay(expectedTot)}, trovato: ${formatNumberITDisplay(tot)})`);
+          
+          // Suggest correction
+          analysis.suggestions.push({
+            row: idx + 1,
+            type: 'amount_correction',
+            message: `Correggere totale a ${formatNumberITDisplay(expectedTot)}`,
+            action: () => {
+              record.tot = expectedTot;
+            }
+          });
+        }
+      }
+    });
+
+    return analysis;
+  }
+
+  // Function to display AI analysis results
+  function displayAIAnalysis(analysis, type) {
+    if (!analysis || (analysis.warnings.length === 0 && analysis.errors.length === 0)) {
+      return;
+    }
+
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'ai-analysis-alert';
+    alertDiv.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      max-width: 400px;
+      background: var(--sys-bg-elevated);
+      border: 1px solid var(--sys-separator);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      z-index: 2000;
+      animation: slideInRight 0.3s ease;
+    `;
+
+    let content = `<h3 style="margin: 0 0 12px 0; font-size: 0.95rem;">🤖 Analisi AI - ${type}</h3>`;
+
+    if (analysis.errors.length > 0) {
+      content += `<div style="margin-bottom: 10px;">`;
+      analysis.errors.slice(0, AI_ANALYSIS_CONFIG.maxErrorsToShow).forEach(err => {
+        content += `<div style="font-size: 0.8rem; color: var(--sys-tint-red); margin: 4px 0;">${err}</div>`;
+      });
+      if (analysis.errors.length > AI_ANALYSIS_CONFIG.maxErrorsToShow) {
+        content += `<div style="font-size: 0.75rem; color: var(--sys-text-secondary);">...e altri ${analysis.errors.length - AI_ANALYSIS_CONFIG.maxErrorsToShow} errori</div>`;
+      }
+      content += `</div>`;
+    }
+
+    if (analysis.warnings.length > 0) {
+      content += `<div style="margin-bottom: 10px;">`;
+      analysis.warnings.slice(0, AI_ANALYSIS_CONFIG.maxWarningsToShow).forEach(warn => {
+        content += `<div style="font-size: 0.8rem; color: var(--sys-tint-yellow); margin: 4px 0;">${warn}</div>`;
+      });
+      content += `</div>`;
+    }
+
+    if (analysis.suggestions.length > 0) {
+      content += `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sys-separator);">`;
+      content += `<div style="font-size: 0.75rem; color: var(--sys-text-secondary); margin-bottom: 6px;">💡 Suggerimenti:</div>`;
+      analysis.suggestions.slice(0, AI_ANALYSIS_CONFIG.maxSuggestionsToShow).forEach(sug => {
+        content += `<div style="font-size: 0.75rem; color: var(--sys-tint-green); margin: 4px 0;">${sug.message}</div>`;
+      });
+      content += `</div>`;
+    }
+
+    content += `<button onclick="this.parentElement.remove()" style="margin-top: 12px; width: 100%; padding: 8px; background: var(--sys-tint-blue); color: white; border: none; border-radius: 6px; cursor: pointer;">Chiudi</button>`;
+
+    alertDiv.innerHTML = content;
+    document.body.appendChild(alertDiv);
+
+    // Auto-remove after configured duration
+    setTimeout(() => {
+      alertDiv.remove();
+    }, AI_ANALYSIS_CONFIG.alertDisplayDuration);
+  }
+
+  // Add CSS animation for AI alert
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes slideInRight {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+
   // --- WIDE MODE TOGGLE ---
   const btnWideMode = document.getElementById('btnWideMode');
   if (btnWideMode) {
@@ -1166,7 +1577,7 @@ function formatDateForUI(dateObj) {
       const selPiva = document.getElementById("selGestPiva");
       const selDen  = document.getElementById("selGestDen");
       const selData = document.getElementById("selGestData");
-      const selDataReg = document
+      const selDataReg = document.getElementById("selGestDataReg");
       const selImp  = document.getElementById("selGestImp");
       const selIva  = document.getElementById("selGestIva");
       const selTot  = document.getElementById("selGestTot");
@@ -4292,10 +4703,15 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     // 3. Renderizza la tabella
     renderResults(filteredResults, forCounts);
 
-    // 4. Aggiorna KPI dashboard
+    // 4. Regenerate card view if mobile view is active
+    if (document.body.classList.contains('card-view-active')) {
+      generateCardView();
+    }
+
+    // 5. Aggiorna KPI dashboard
     renderPeriodKpi(lastResults);
     
-    // 5. Aggiorna stato bottone "Export Vista Attuale"
+    // 6. Aggiorna stato bottone "Export Vista Attuale"
     const btnExpFilt = document.getElementById("btnExportFiltered");
     if(btnExpFilt) {
         btnExpFilt.disabled = (filteredResults.length === 0);
@@ -4563,6 +4979,18 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       });
       lastAdeRecords = adeRecords;
       lastGestRecords = gestRecords;
+
+      // 🤖 AI ANALYSIS: Analyze loaded data for issues
+      const adeAnalysis = analyzeExcelData(adeRecords, 'ADE');
+      const gestAnalysis = analyzeExcelData(gestRecords, 'Gestionale');
+      
+      // Display AI analysis results
+      if (adeAnalysis.warnings.length > 0 || adeAnalysis.errors.length > 0) {
+        displayAIAnalysis(adeAnalysis, 'File ADE');
+      }
+      if (gestAnalysis.warnings.length > 0 || gestAnalysis.errors.length > 0) {
+        setTimeout(() => displayAIAnalysis(gestAnalysis, 'File Gestionale'), 500);
+      }
 
       // aggiorna copertura periodo
       updatePeriodCoverage(adeRecords, gestRecords);
