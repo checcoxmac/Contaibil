@@ -5543,6 +5543,7 @@ function computePeriodKpi(results) {
             adeCount: 0,
             matchOk: 0,
             matchFix: 0,
+            multiMatch: 0,
             soloAde: 0,
             soloGest: 0
           });
@@ -5568,6 +5569,7 @@ function computePeriodKpi(results) {
         adeCount: 0,
         matchOk: 0,
         matchFix: 0,
+        multiMatch: 0,
         soloAde: 0,
         soloGest: 0
       });
@@ -5581,6 +5583,8 @@ function computePeriodKpi(results) {
       agg.matchOk++;
     } else if (r.STATUS === "MATCH_FIX") {
       agg.matchFix++;
+    } else if (r.STATUS === "MULTI_MATCH") {
+      agg.multiMatch++;
     } else if (r.STATUS === "SOLO_ADE") {
       // 🔸 SOLO le SOLO_ADE con P.IVA italiana le consideriamo "buco vero"
       if (isItalian) {
@@ -5676,6 +5680,11 @@ function renderPeriodKpi(results) {
     tdFix.className = "mono";
     tdFix.textContent = row.matchFix;
     tr.appendChild(tdFix);
+
+    const tdMulti = document.createElement("td");
+    tdMulti.className = "mono";
+    tdMulti.textContent = row.multiMatch || 0;
+    tr.appendChild(tdMulti);
 
     const tdSoloAde = document.createElement("td");
     tdSoloAde.className = "mono";
