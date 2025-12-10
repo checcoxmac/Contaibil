@@ -1900,35 +1900,36 @@ function formatDateForUI(dateObj) {
     const iva = cleanIVAValue(ivaRaw, piva);
     
     // ===== TOTALE ADE: COMPUTE ONLY IF MISSING/ZERO =====
-    // Se il file ADE fornisce un totale valido (non vuoto/non zero), lo manteniamo
-    // Altrimenti calcoliamo: tot = round(imp + iva, 2)
+    // If the ADE file provides a total column (via config or custom export), use it
+    // Otherwise, compute: tot = round(imp + iva, 2)
     let tot = 0;
-    const totRaw = r[colImp] ? (r["Totale documento"] || r["Totale"] || "") : "";
-    if (totRaw && totRaw !== "") {
-      const totFromFile = parseNumberIT(totRaw);
+    const colTot = cfg.tot; // Check if there's a configured total column for ADE
+    if (colTot && r[colTot]) {
+      const totFromFile = parseNumberIT(r[colTot]);
       if (totFromFile !== 0) {
+        // ADE file has a non-zero total - keep it unchanged
         tot = totFromFile;
         if (MATCH_CONFIG.DEBUG_ADE_ENABLED && recs.length < MATCH_CONFIG.DEBUG_ADE_SAMPLE_SIZE) {
-          console.log(`   ✅ Totale da file ADE: ${tot}`);
+          console.log(`   ✅ Totale from ADE file column "${colTot}": ${tot}`);
         }
       } else {
-        // Totale è zero nel file, lo calcoliamo
+        // Total is zero in file - compute it
         tot = +(imp + iva).toFixed(2);
         if (MATCH_CONFIG.DEBUG_ADE_ENABLED && recs.length < MATCH_CONFIG.DEBUG_ADE_SAMPLE_SIZE) {
-          console.log(`   ⚠️ Totale zero nel file, calcolato: ${tot}`);
+          console.log(`   ⚠️ Totale zero in ADE, computed: ${tot}`);
         }
       }
     } else {
-      // Totale mancante nel file, lo calcoliamo
+      // No total column configured/available - compute it (standard ADE format)
       tot = +(imp + iva).toFixed(2);
       if (MATCH_CONFIG.DEBUG_ADE_ENABLED && recs.length < MATCH_CONFIG.DEBUG_ADE_SAMPLE_SIZE) {
-        console.log(`   ⚠️ Totale mancante, calcolato: ${tot}`);
+        console.log(`   ℹ️ No total column in ADE, computed: ${tot}`);
       }
     }
     
     // 🔍 DEBUG: Valori finali parsed
     if (MATCH_CONFIG.DEBUG_ADE_ENABLED && recs.length < MATCH_CONFIG.DEBUG_ADE_SAMPLE_SIZE) {
-      console.log(`   ✅ Valori finali: imp=${imp}, iva=${iva}, tot=${tot}`);
+      console.log(`   ✅ Valori finali: imp=${imp}, iva=${iva}, tot=${tot} (computed from imp+iva)`);
       console.log(`   Normalized keys: numDigits="${normalizeInvoiceNumber(num, false)}", denNorm="${normalizeName(den).substring(0, 30)}..."`);
     }
     
