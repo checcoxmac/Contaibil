@@ -4608,6 +4608,63 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       // 🔍 Post-processing: flagga casi sospetti SOLO_ADE/SOLO_GEST
       lastResults = flagSuspiciousSoloAdeSoloGest(lastResults);
       
+      // ============================================================
+      // ✅ INTEGRITY CHECK: Verifica conteggio totale
+      // ============================================================
+      // REQUISITO: Assicurarsi che ogni riga ADE e GEST abbia uno status
+      // e che i conteggi tornino
+      const adeInResults = lastResults.filter(r => r.ADE !== null).length;
+      const gestInResults = lastResults.filter(r => r.GEST !== null).length;
+      
+      console.log("✅ INTEGRITY CHECK:");
+      console.log(`   ADE Records Loaded: ${adeRecords.length}`);
+      console.log(`   ADE Records in Results: ${adeInResults}`);
+      console.log(`   GEST Records Loaded: ${gestRecords.length}`);
+      console.log(`   GEST Records in Results: ${gestInResults}`);
+      
+      if (adeInResults !== adeRecords.length) {
+        console.error(`❌ INTEGRITY VIOLATION: Missing ADE rows! Expected ${adeRecords.length}, got ${adeInResults}`);
+        console.error("   This should never happen - all ADE rows must have a status");
+      }
+      
+      if (gestInResults !== gestRecords.length) {
+        console.error(`❌ INTEGRITY VIOLATION: Missing GEST rows! Expected ${gestRecords.length}, got ${gestInResults}`);
+        console.error("   This should never happen - all GEST rows must have a status");
+      }
+      
+      if (adeInResults === adeRecords.length && gestInResults === gestRecords.length) {
+        console.log("   ✅ INTEGRITY CHECK PASSED: All rows accounted for");
+      }
+      
+      // Count by status to verify classification
+      const statusCounts = {
+        MATCH_OK: 0,
+        MATCH_FIX: 0,
+        MANUAL_MATCH: 0,
+        SOLO_ADE: 0,
+        SOLO_GEST: 0,
+        OTHER: 0
+      };
+      
+      lastResults.forEach(r => {
+        if (r.STATUS === "MATCH_OK") statusCounts.MATCH_OK++;
+        else if (r.STATUS === "MATCH_FIX") statusCounts.MATCH_FIX++;
+        else if (r.STATUS === "MANUAL_MATCH") statusCounts.MANUAL_MATCH++;
+        else if (r.STATUS === "SOLO_ADE") statusCounts.SOLO_ADE++;
+        else if (r.STATUS === "SOLO_GEST") statusCounts.SOLO_GEST++;
+        else statusCounts.OTHER++;
+      });
+      
+      console.log("   Status Distribution:");
+      console.log(`     MATCH_OK: ${statusCounts.MATCH_OK}`);
+      console.log(`     MATCH_FIX: ${statusCounts.MATCH_FIX}`);
+      console.log(`     MANUAL_MATCH: ${statusCounts.MANUAL_MATCH}`);
+      console.log(`     SOLO_ADE: ${statusCounts.SOLO_ADE}`);
+      console.log(`     SOLO_GEST: ${statusCounts.SOLO_GEST}`);
+      if (statusCounts.OTHER > 0) {
+        console.warn(`     ⚠️ UNKNOWN STATUS: ${statusCounts.OTHER}`);
+      }
+      
       nextResultId = 1;
       lastResults.forEach(r => {
         r.id = nextResultId++;
