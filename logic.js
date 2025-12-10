@@ -2648,8 +2648,13 @@ function correctInvertedDates(adeRecord, gestRecord) {
 
 /**
  * Classifica la nota di match in base alla differenza importi
- * @param {number} diffTotale - Differenza tra ADE e GEST
- * @param {Object} adeRecord - Record ADE
+ * 
+ * 🔒 IMMUTABILITÀ ADE: Questa funzione confronta ADE vs Gestionale
+ * ma NON modifica mai i valori ADE. Solo calcola differenze e 
+ * imposta status/note appropriate (MATCH_OK, MATCH_FIX, ecc.)
+ * 
+ * @param {number} diffTotale - Differenza tra ADE e GEST (ADE_tot - GEST_tot)
+ * @param {Object} adeRecord - Record ADE (valori immutabili)
  * @param {Object} gestRecord - Record Gestionale
  * @param {Object} ncInfo - Info nota di credito invertita
  * @param {string} criterio - Criterio di matching usato
@@ -2718,28 +2723,35 @@ function matchRecords(adeList, gestList) {
   const matchedGest = new Set();
   const results = [];
 
+    // ============================================================
+    // 🔒 ADD MATCH - Crea abbinamento senza modificare valori ADE
+    // ============================================================
+    // Questa funzione crea un match tra record ADE e Gestionale.
+    // IMPORTANTE: NON modifica mai i valori ADE (imponibile, IVA, totale).
+    // Calcola solo la differenza (DIFF_TOTALE) e imposta status/note.
+    // ============================================================
     function addMatch(a, g, type, criterio) {
       matchedAde.add(a.idx);
       matchedGest.add(g.idx);
 
       let status = (type === "OK" || type === "MATCH_OK") ? "MATCH_OK" : "MATCH_FIX";
 
-      // Correzione date invertite
+      // Correzione date invertite (solo per visualizzazione, non modifica dati originali)
       correctInvertedDates(a, g);
 
-      // Calcolo differenza
+      // 🔒 Calcolo differenza: ADE - GEST (ADE rimane immutabile)
       const diffTotale = (a?.tot || 0) - (g?.tot || 0);
       const ncInfo = detectNCInvertita(a, g);
       
-      // Classificazione
+      // Classificazione basata su differenza (status e note, NO modifica valori)
       const classification = classifyMatchNote(diffTotale, a, g, ncInfo, criterio);
 
       const record = {
-        ADE: a,
-        GEST: g,
+        ADE: a,           // 🔒 Valori ADE immutabili
+        GEST: g,          // Valori Gestionale (possono essere modificati dall'utente)
         STATUS: classification.status,
         CRITERIO: criterio,
-        DIFF_TOTALE: diffTotale,
+        DIFF_TOTALE: diffTotale,  // Solo per report, non modifica ADE
         ORIGINE: "MATCH",
         NOTE_MATCH: classification.note,
         FLAG_REVISIONE: ""  // Inizializzato vuoto, sarà popolato dal post-processing
