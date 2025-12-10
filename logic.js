@@ -1913,8 +1913,10 @@ function formatDateForUI(dateObj) {
     const ivaRaw = r[colIva] || "";
     const totRaw = colTot ? (r[colTot] || "") : "";
     
-    // 🔍 DEBUG: Log valori grezzi VERBATIM dal file ADE
-    if (num === "2528012466" || String(num).includes("2528012466")) {
+    // 🔍 DEBUG: Log valori grezzi VERBATIM dal file ADE (only for first 3 rows)
+    // This debug mode helps troubleshoot parsing issues without cluttering logs
+    const debugFirstNRows = 3;
+    if (recs.length < debugFirstNRows) {
       console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE VERBATIM:`);
       console.log(`   📊 Colonna Imponibile: "${colImp}"`);
       console.log(`   📊 Valore grezzo: "${impRaw}"`);
@@ -1922,12 +1924,6 @@ function formatDateForUI(dateObj) {
       console.log(`   📊 Valore grezzo IVA: "${ivaRaw}"`);
       console.log(`   📊 Colonna Totale: "${colTot || '(nessuna)'}"`);
       console.log(`   📊 Valore grezzo Totale: "${totRaw}"`);
-      
-      // Mostra TUTTA la riga
-      console.log(`   📋 RIGA COMPLETA:`, r);
-      H.forEach((colName, idx) => {
-        console.log(`      [${idx}] "${colName}" = "${r[colName]}"`);
-      });
     }
     
     // ✅ PARSING DIRETTO - Nessuna correzione, nessun auto-fix
@@ -1936,24 +1932,25 @@ function formatDateForUI(dateObj) {
     const iva = parseNumberIT(ivaRaw);  // NON usa cleanIVAValue - parsing diretto
     
     // ✅ TOTALE CONDIZIONALE
-    // Se ADE_Totale è presente e non-zero, usalo
+    // Se ADE_Totale è presente (non vuoto), usalo
     // Altrimenti calcola come round(imp + iva, 2)
     let tot;
-    const totFromFile = parseNumberIT(totRaw);
-    if (totFromFile !== 0) {
-      // Totale presente nel file ADE - usalo verbatim
-      tot = totFromFile;
+    // Check if totRaw is actually provided (not null/undefined/empty string)
+    // A legitimate zero total would be "0" or "0.00" in the file
+    const hasTotaleColumn = totRaw && totRaw.toString().trim() !== "";
+    if (hasTotaleColumn) {
+      // Totale present in ADE file - use verbatim (even if zero)
+      tot = parseNumberIT(totRaw);
       console.log(`   ℹ️ ADE [${num}]: Totale da file ADE: ${tot}`);
     } else {
-      // Totale mancante o zero - calcola
+      // Totale missing or empty - calculate
       tot = +(imp + iva).toFixed(2);
       console.log(`   ℹ️ ADE [${num}]: Totale calcolato (imp+iva): ${tot}`);
     }
     
-    // 🔍 DEBUG: Valori dopo parsing IMMUTABILE
-    if (num === "2528012466" || String(num).includes("2528012466")) {
+    // 🔍 DEBUG: Valori dopo parsing IMMUTABILE (only for first 3 rows)
+    if (recs.length < debugFirstNRows) {
       console.log(`   ✅ VALORI FINALI (IMMUTABILI): imp=${imp}, iva=${iva}, tot=${tot}`);
-      console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
     const tipoDoc = (r[colTipo] || "").toUpperCase();
@@ -3362,6 +3359,10 @@ function matchRecords(adeList, gestList) {
     // ============================================================
     // REQUISITO: Includere tutte le righe isForeign con status esplicito
     // Non skippare mai nessuna riga - assegnare sempre uno stato
+    // 
+    // NOTA: Le righe foreign sono state filtrate fuori dagli array ade/gest
+    // all'inizio della funzione (lines 2639-2642), quindi non sono mai
+    // entrate nel matching e non possono essere duplicate qui.
     // ============================================================
     const foreignAde = adeList.filter(r => r.isForeign);
     const foreignGest = gestList.filter(r => r.isForeign);
@@ -4612,9 +4613,13 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       // ✅ INTEGRITY CHECK: Verifica conteggio totale
       // ============================================================
       // REQUISITO: Assicurarsi che ogni riga ADE e GEST abbia uno status
-      // e che i conteggi tornino
-      const adeInResults = lastResults.filter(r => r.ADE !== null).length;
-      const gestInResults = lastResults.filter(r => r.GEST !== null).length;
+      // e che i conteggi tornino (single pass for efficiency)
+      let adeInResults = 0;
+      let gestInResults = 0;
+      lastResults.forEach(r => {
+        if (r.ADE !== null) adeInResults++;
+        if (r.GEST !== null) gestInResults++;
+      });
       
       console.log("✅ INTEGRITY CHECK:");
       console.log(`   ADE Records Loaded: ${adeRecords.length}`);
