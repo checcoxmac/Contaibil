@@ -122,66 +122,121 @@ window.addEventListener("DOMContentLoaded", () => {
     const a = row.ADE;
     const g = row.GEST;
 
-    card.innerHTML = `
+    // Make card clickable if it's editable
+    const isClickable = row.STATUS === 'MATCH_FIX' || row.STATUS === 'SOLO_GEST' || row.STATUS === 'MANUAL_MATCH' || row.STATUS === 'SOLO_ADE';
+    if (isClickable) {
+      card.classList.add('clickable');
+    }
+
+    let cardContent = `
       <div class="card-item-header">
         <div class="card-item-title">${a ? a.den || g?.den || 'N/D' : g?.den || 'N/D'}</div>
         <div class="card-item-status status-pill ${statusClass}">${row.STATUS}</div>
       </div>
       <div class="card-item-body">
-        ${a ? `
+    `;
+
+    // ADE Section
+    if (a) {
+      cardContent += `
+        <div class="card-item-section">
+          <div class="card-item-section-title">📊 Dati ADE</div>
           <div class="card-item-row">
-            <span class="card-item-label">Num. ADE:</span>
+            <span class="card-item-label">Numero:</span>
             <span class="card-item-value">${a.num || 'N/D'}</span>
           </div>
           <div class="card-item-row">
-            <span class="card-item-label">Data ADE:</span>
+            <span class="card-item-label">Data:</span>
             <span class="card-item-value">${a.dataStr || formatDateIT(a.data) || 'N/D'}</span>
           </div>
           <div class="card-item-row">
-            <span class="card-item-label">Totale ADE:</span>
-            <span class="card-item-value">${formatNumberITDisplay(a.tot)}</span>
+            <span class="card-item-label">P.IVA:</span>
+            <span class="card-item-value">${a.piva || 'N/D'}</span>
           </div>
-        ` : ''}
-        ${g ? `
           <div class="card-item-row">
-            <span class="card-item-label">Num. Gest:</span>
+            <span class="card-item-label">Imponibile:</span>
+            <span class="card-item-value">${formatNumberITDisplay(a.imp)}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">IVA:</span>
+            <span class="card-item-value">${formatNumberITDisplay(a.iva)}</span>
+          </div>
+          <div class="card-item-row">
+            <span class="card-item-label">Totale:</span>
+            <span class="card-item-value" style="font-weight: 600;">${formatNumberITDisplay(a.tot)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Gestionale Section
+    if (g) {
+      cardContent += `
+        <div class="card-item-section">
+          <div class="card-item-section-title">🏢 Dati Gestionale</div>
+          <div class="card-item-row">
+            <span class="card-item-label">Numero:</span>
             <span class="card-item-value">${g.num || 'N/D'}</span>
           </div>
           <div class="card-item-row">
-            <span class="card-item-label">Data Gest:</span>
+            <span class="card-item-label">Data:</span>
             <span class="card-item-value">${g.dataStr || formatDateIT(g.data) || 'N/D'}</span>
           </div>
           <div class="card-item-row">
-            <span class="card-item-label">Totale Gest:</span>
-            <span class="card-item-value">${formatNumberITDisplay(g.tot)}</span>
+            <span class="card-item-label">Imponibile:</span>
+            <span class="card-item-value">${formatNumberITDisplay(g.imp)}</span>
           </div>
-        ` : ''}
-        ${row.CRITERIO ? `
           <div class="card-item-row">
-            <span class="card-item-label">Criterio:</span>
-            <span class="card-item-value" style="font-size: 0.75rem;">${row.CRITERIO}</span>
+            <span class="card-item-label">IVA:</span>
+            <span class="card-item-value">${formatNumberITDisplay(g.iva)}</span>
           </div>
-        ` : ''}
-      </div>
-    `;
+          <div class="card-item-row">
+            <span class="card-item-label">Totale:</span>
+            <span class="card-item-value" style="font-weight: 600;">${formatNumberITDisplay(g.tot)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Criterio section if available
+    if (row.CRITERIO) {
+      cardContent += `
+        <div class="card-item-section">
+          <div class="card-item-section-title">ℹ️ Informazioni Match</div>
+          <div class="card-item-row">
+            <span class="card-item-value" style="font-size: 0.75rem; text-align: left; max-width: 100%; white-space: normal;">${row.CRITERIO}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    cardContent += `</div>`; // Close card-item-body
+
+    card.innerHTML = cardContent;
 
     // Add click handler for editing
-    card.addEventListener('click', () => {
-      if (row.STATUS === 'MATCH_FIX' || row.STATUS === 'SOLO_GEST' || row.STATUS === 'MANUAL_MATCH' || row.STATUS === 'SOLO_ADE') {
+    if (isClickable) {
+      card.addEventListener('click', () => {
         openEditPanel(row.rowId);
-      }
-    });
+      });
+    }
 
     return card;
   }
 
   // ============================================================
-  // 🤖 AI-POWERED EXCEL ANALYSIS
+  // 🤖 AI-POWERED EXCEL ANALYSIS - CONFIGURATION
   // ============================================================
-  const aiAnalysisConfig = {
-    emptyCellThreshold: 0.3, // 30% empty cells triggers warning
-    duplicateThreshold: 2,   // More than 2 duplicates triggers warning
-    mismatchThreshold: 0.05, // 5% tolerance for amount mismatches
+  // These thresholds can be adjusted based on your needs
+  const AI_ANALYSIS_CONFIG = {
+    emptyCellThreshold: 0.3,     // 30% empty cells triggers warning
+    duplicateThreshold: 2,        // More than 2 duplicates triggers warning
+    mismatchThreshold: 0.05,      // 5% tolerance for amount mismatches (€0.05)
+    mismatchPercentage: 0.01,     // 1% percentage tolerance
+    maxErrorsToShow: 3,           // Max errors to display in alert
+    maxWarningsToShow: 2,         // Max warnings to display in alert
+    maxSuggestionsToShow: 2,      // Max suggestions to display in alert
+    alertDisplayDuration: 15000,  // Auto-hide alert after 15 seconds
   };
 
   function analyzeExcelData(records, type) {
@@ -220,7 +275,7 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    if (emptyCount / totalFields > aiAnalysisConfig.emptyCellThreshold) {
+    if (emptyCount / totalFields > AI_ANALYSIS_CONFIG.emptyCellThreshold) {
       analysis.warnings.push(`⚠️ ${type}: Troppe celle vuote (${Math.round(emptyCount / totalFields * 100)}% del totale)`);
     }
 
@@ -238,7 +293,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     invoiceNumbers.forEach((occurrences, num) => {
-      if (occurrences.length >= aiAnalysisConfig.duplicateThreshold) {
+      if (occurrences.length >= AI_ANALYSIS_CONFIG.duplicateThreshold) {
         analysis.duplicates.push({
           invoiceNumber: num,
           occurrences: occurrences,
@@ -258,7 +313,7 @@ window.addEventListener("DOMContentLoaded", () => {
         const expectedTot = imp + iva;
         const diff = Math.abs(tot - expectedTot);
 
-        if (diff > aiAnalysisConfig.mismatchThreshold && diff / tot > 0.01) {
+        if (diff > AI_ANALYSIS_CONFIG.mismatchThreshold && diff / tot > AI_ANALYSIS_CONFIG.mismatchPercentage) {
           analysis.inconsistencies.push({
             row: idx + 1,
             expected: expectedTot,
@@ -309,18 +364,18 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (analysis.errors.length > 0) {
       content += `<div style="margin-bottom: 10px;">`;
-      analysis.errors.slice(0, 3).forEach(err => {
+      analysis.errors.slice(0, AI_ANALYSIS_CONFIG.maxErrorsToShow).forEach(err => {
         content += `<div style="font-size: 0.8rem; color: var(--sys-tint-red); margin: 4px 0;">${err}</div>`;
       });
-      if (analysis.errors.length > 3) {
-        content += `<div style="font-size: 0.75rem; color: var(--sys-text-secondary);">...e altri ${analysis.errors.length - 3} errori</div>`;
+      if (analysis.errors.length > AI_ANALYSIS_CONFIG.maxErrorsToShow) {
+        content += `<div style="font-size: 0.75rem; color: var(--sys-text-secondary);">...e altri ${analysis.errors.length - AI_ANALYSIS_CONFIG.maxErrorsToShow} errori</div>`;
       }
       content += `</div>`;
     }
 
     if (analysis.warnings.length > 0) {
       content += `<div style="margin-bottom: 10px;">`;
-      analysis.warnings.slice(0, 2).forEach(warn => {
+      analysis.warnings.slice(0, AI_ANALYSIS_CONFIG.maxWarningsToShow).forEach(warn => {
         content += `<div style="font-size: 0.8rem; color: var(--sys-tint-yellow); margin: 4px 0;">${warn}</div>`;
       });
       content += `</div>`;
@@ -329,7 +384,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (analysis.suggestions.length > 0) {
       content += `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sys-separator);">`;
       content += `<div style="font-size: 0.75rem; color: var(--sys-text-secondary); margin-bottom: 6px;">💡 Suggerimenti:</div>`;
-      analysis.suggestions.slice(0, 2).forEach(sug => {
+      analysis.suggestions.slice(0, AI_ANALYSIS_CONFIG.maxSuggestionsToShow).forEach(sug => {
         content += `<div style="font-size: 0.75rem; color: var(--sys-tint-green); margin: 4px 0;">${sug.message}</div>`;
       });
       content += `</div>`;
@@ -340,10 +395,10 @@ window.addEventListener("DOMContentLoaded", () => {
     alertDiv.innerHTML = content;
     document.body.appendChild(alertDiv);
 
-    // Auto-remove after 15 seconds
+    // Auto-remove after configured duration
     setTimeout(() => {
       alertDiv.remove();
-    }, 15000);
+    }, AI_ANALYSIS_CONFIG.alertDisplayDuration);
   }
 
   // Add CSS animation for AI alert
@@ -1522,7 +1577,7 @@ function formatDateForUI(dateObj) {
       const selPiva = document.getElementById("selGestPiva");
       const selDen  = document.getElementById("selGestDen");
       const selData = document.getElementById("selGestData");
-      const selDataReg = document
+      const selDataReg = document.getElementById("selGestDataReg");
       const selImp  = document.getElementById("selGestImp");
       const selIva  = document.getElementById("selGestIva");
       const selTot  = document.getElementById("selGestTot");
