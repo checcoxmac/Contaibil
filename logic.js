@@ -1771,6 +1771,9 @@ function formatDateForUI(dateObj) {
   function buildAdeRecords(parsed) {
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
+  
+  // Debug configuration: how many rows to log in detail
+  const DEBUG_FIRST_N_ROWS = 3;
 
   // 🔍 DEBUG: Stampa TUTTE le colonne del file ADE
   console.log("🔥🔥🔥 ===== INIZIO DEBUG FILE ADE ===== 🔥🔥🔥");
@@ -1833,6 +1836,28 @@ function formatDateForUI(dateObj) {
     }
   }
   
+  // ============================================================
+  // 🆕 RICERCA COLONNA TOTALE ADE (opzionale)
+  // ============================================================
+  // Alcuni file ADE possono avere una colonna "Totale documento"
+  // Se presente e valorizzata, la usiamo; altrimenti calcoliamo imp+iva
+  let colTot = cfg.tot;
+  if (!colTot) {
+    // Cerca colonne che potrebbero contenere il totale
+    const idxTotAde = H.indexOf("Totale documento");
+    if (idxTotAde !== -1) {
+      colTot = H[idxTotAde];
+      console.log(`✅ ADE Totale trovato: colonna [${idxTotAde}] = "${colTot}"`);
+    } else {
+      // Fallback: cerca case-insensitive
+      const idxFallback = h.indexOf("totale documento");
+      if (idxFallback !== -1) {
+        colTot = H[idxFallback];
+        console.log(`⚠️ ADE Totale trovato (lowercase): colonna [${idxFallback}] = "${colTot}"`);
+      }
+    }
+  }
+  
   const colTipo  = findCol(H, h, "tipo documento");
 
   // 🔍 DEBUG: Log mapping colonne per diagnostica
@@ -1843,6 +1868,7 @@ function formatDateForUI(dateObj) {
   console.log(`   Denominazione: "${colDenFor}"`);
   console.log(`   ⭐ Imponibile: "${colImp}"`);
   console.log(`   ⭐ IVA: "${colIva}"`);
+  console.log(`   ⭐ Totale: "${colTot || '(nessuna - sarà calcolato)'}"`);
   console.log(`   Tipo Documento: "${colTipo}"`);
 
   updateColumnConfig("ADE", {
@@ -1851,7 +1877,8 @@ function formatDateForUI(dateObj) {
     piva: colPivaFor || colPivaCli,
     den: colDenFor,
     imp: colImp,
-    iva: colIva
+    iva: colIva,
+    tot: colTot
   });
 
   const recs = [];
@@ -1877,85 +1904,58 @@ function formatDateForUI(dateObj) {
     const data = parseDateFlexible(dataIso);                   // Oggetto Date per confronti (usa ISO già normalizzato)
     const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
-    // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
-    let impRaw = r[colImp] || "";
-    let ivaRaw = r[colIva] || "";
+    // ============================================================
+    // ===== PARSING IMPORTI ADE - IMMUTABILE =====
+    // ============================================================
+    // REQUISITO: Trattare imponibile e imposta da ADE come valori ufficiali
+    // NON modificare, NON correggere, NON sovrascrivere
+    // Usare i valori del file ADE esattamente come sono
+    // ============================================================
     
-    // 🔧 AUTO-FIX PRE-PARSING (versione prudente)
-    if (
-      colImp && colData &&
-      colImp === colData &&
-      impRaw &&
-      String(impRaw).includes("/") &&
-      String(impRaw).match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
-    ) {
-      console.warn(`⚠️ ADE [${num}]: Imponibile contiene una DATA ("${impRaw}") sulla stessa colonna della data. Provo a cercare l'importo corretto...`);
-
-      let foundValue = null;
-      let foundCol = null;
-
-      for (let i = 0; i < H.length; i++) {
-        const colName = H[i];
-        const val = r[colName] || "";
-
-        if (String(val).includes("/")) continue;
-        if (String(val).length === 11 && !isNaN(val)) continue;
-
-        const lowerName = colName.toLowerCase();
-        if (lowerName.includes("data")) continue;
-        if (lowerName.includes("partita")) continue;
-        if (lowerName.includes("codice")) continue;
-
-        const numVal = parseNumberIT(val);
-        if (numVal >= 1 && numVal < 999999) {
-          foundValue = numVal;
-          foundCol = colName;
-          break;
-        }
-      }
-
-      if (foundValue !== null) {
-        console.log(`   ✅ CORRETTO IMPONIBILE ADE: uso ${foundValue} € da colonna "${foundCol}"`);
-        impRaw = String(foundValue);
-      } else {
-        console.error(`   ❌ Nessun valore numerico imponibile trovato nella riga ADE. Lascio imponibile = 0`);
-        impRaw = "0";
-      }
-    }
-
-    // 🔍 DEBUG: Log valori grezzi (DOPO auto-fix se necessario)
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE:`);
+    const impRaw = r[colImp] || "";
+    const ivaRaw = r[colIva] || "";
+    const totRaw = colTot ? (r[colTot] || "") : "";
+    
+    // 🔍 DEBUG: Log valori grezzi VERBATIM dal file ADE (only for first N rows)
+    // This debug mode helps troubleshoot parsing issues without cluttering logs
+    if (recs.length < DEBUG_FIRST_N_ROWS) {
+      console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE VERBATIM:`);
       console.log(`   📊 Colonna Imponibile: "${colImp}"`);
-      console.log(`   📊 Valore grezzo (dopo auto-fix): "${impRaw}"`);
+      console.log(`   📊 Valore grezzo: "${impRaw}"`);
       console.log(`   📊 Colonna IVA: "${colIva}"`);
       console.log(`   📊 Valore grezzo IVA: "${ivaRaw}"`);
-      
-      // Mostra TUTTA la riga
-      console.log(`   📋 RIGA COMPLETA:`, r);
-      H.forEach((colName, idx) => {
-        console.log(`      [${idx}] "${colName}" = "${r[colName]}"`);
-      });
+      console.log(`   📊 Colonna Totale: "${colTot || '(nessuna)'}"`);
+      console.log(`   📊 Valore grezzo Totale: "${totRaw}"`);
     }
     
-    // ORA fai il parsing con il valore corretto
-    let imp = parseNumberIT(impRaw);
-    let iva = cleanIVAValue(ivaRaw, piva);
-    let tot = +(imp + iva).toFixed(2);
+    // ✅ PARSING DIRETTO - Nessuna correzione, nessun auto-fix
+    // Parse imponibile e IVA esattamente come vengono dal file ADE
+    const imp = parseNumberIT(impRaw);
+    const iva = parseNumberIT(ivaRaw);  // NON usa cleanIVAValue - parsing diretto
     
-    // 🔍 DEBUG: Valori dopo parsing
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
+    // ✅ TOTALE CONDIZIONALE
+    // Se ADE_Totale è presente (non vuoto), usalo
+    // Altrimenti calcola come round(imp + iva, 2)
+    let tot;
+    // Check if totRaw is actually provided (not null/undefined/empty string)
+    // A legitimate zero total would be "0" or "0.00" in the file (string)
+    // Must check for null/undefined separately to handle number 0 correctly
+    const hasTotaleColumn = totRaw !== null && 
+                           totRaw !== undefined && 
+                           totRaw.toString().trim() !== "";
+    if (hasTotaleColumn) {
+      // Totale present in ADE file - use verbatim (even if zero)
+      tot = parseNumberIT(totRaw);
+      console.log(`   ℹ️ ADE [${num}]: Totale da file ADE: ${tot}`);
+    } else {
+      // Totale missing or empty - calculate
+      tot = +(imp + iva).toFixed(2);
+      console.log(`   ℹ️ ADE [${num}]: Totale calcolato (imp+iva): ${tot}`);
     }
     
-    // ✅ VALIDAZIONE IMPORTI
-    const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
-    tot = validated.tot;
-    
-    // 🔍 DEBUG FINALE: Valori nel record
-    if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ RECORD FINALE: imp=${imp}, iva=${iva}, tot=${tot}`);
-      console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
+    // 🔍 DEBUG: Valori dopo parsing IMMUTABILE (only for first N rows)
+    if (recs.length < DEBUG_FIRST_N_ROWS) {
+      console.log(`   ✅ VALORI FINALI (IMMUTABILI): imp=${imp}, iva=${iva}, tot=${tot}`);
     }
     
     const tipoDoc = (r[colTipo] || "").toUpperCase();
@@ -2638,13 +2638,26 @@ function classifyMatchNote(diffTotale, adeRecord, gestRecord, ncInfo, criterio) 
 }
 
 function matchRecords(adeList, gestList) {
-  const ade = adeList
-    .filter(r => !r.isForeign)    // <-- niente P.IVA estera ADE
-    .map((r, idx) => ({ idx, ...r }));
+  // Separate foreign and domestic records in one pass for efficiency
+  const ade = [];
+  const foreignAde = [];
+  adeList.forEach((r, idx) => {
+    if (r.isForeign) {
+      foreignAde.push(r);
+    } else {
+      ade.push({ idx, ...r });
+    }
+  });
 
-  const gest = gestList
-    .filter(r => !r.isForeign)    // <-- niente P.IVA estera Gest
-    .map((r, idx) => ({ idx, ...r }));
+  const gest = [];
+  const foreignGest = [];
+  gestList.forEach((r, idx) => {
+    if (r.isForeign) {
+      foreignGest.push(r);
+    } else {
+      gest.push({ idx, ...r });
+    }
+  });
 
   const matchedAde = new Set();
   const matchedGest = new Set();
@@ -3357,6 +3370,40 @@ function matchRecords(adeList, gestList) {
           DIFF_TOTALE: 0  // Non applicabile per righe non matchate
         });
       }
+    }
+
+    // ============================================================
+    // 🌍 INCLUSIONE RIGHE ESTERE (FOREIGN)
+    // ============================================================
+    // REQUISITO: Includere tutte le righe isForeign con status esplicito
+    // Non skippare mai nessuna riga - assegnare sempre uno stato
+    // 
+    // NOTA: Le righe foreign sono state separate all'inizio della funzione
+    // (foreignAde e foreignGest arrays), quindi sono già pronte da usare qui.
+    // ============================================================
+    
+    for (const a of foreignAde) {
+      results.push({
+        ADE: a,
+        GEST: null,
+        STATUS: "SOLO_ADE",
+        CRITERIO: "FOREIGN_PIVA",
+        NOTE_MATCH: "Fattura estera (P.IVA non italiana) - fuori perimetro matching",
+        ORIGINE: "SOLO_ADE",
+        DIFF_TOTALE: 0
+      });
+    }
+    
+    for (const g of foreignGest) {
+      results.push({
+        ADE: null,
+        GEST: g,
+        STATUS: "SOLO_GEST",
+        CRITERIO: "FOREIGN_PIVA",
+        NOTE_MATCH: "Fattura estera (P.IVA non italiana) - fuori perimetro matching",
+        ORIGINE: "SOLO_GESTIONALE",
+        DIFF_TOTALE: 0
+      });
     }
 
     // ============================================================
@@ -4576,6 +4623,67 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       
       // 🔍 Post-processing: flagga casi sospetti SOLO_ADE/SOLO_GEST
       lastResults = flagSuspiciousSoloAdeSoloGest(lastResults);
+      
+      // ============================================================
+      // ✅ INTEGRITY CHECK: Verifica conteggio totale
+      // ============================================================
+      // REQUISITO: Assicurarsi che ogni riga ADE e GEST abbia uno status
+      // e che i conteggi tornino (single pass for efficiency)
+      let adeInResults = 0;
+      let gestInResults = 0;
+      lastResults.forEach(r => {
+        if (r.ADE !== null) adeInResults++;
+        if (r.GEST !== null) gestInResults++;
+      });
+      
+      console.log("✅ INTEGRITY CHECK:");
+      console.log(`   ADE Records Loaded: ${adeRecords.length}`);
+      console.log(`   ADE Records in Results: ${adeInResults}`);
+      console.log(`   GEST Records Loaded: ${gestRecords.length}`);
+      console.log(`   GEST Records in Results: ${gestInResults}`);
+      
+      if (adeInResults !== adeRecords.length) {
+        console.error(`❌ INTEGRITY VIOLATION: Missing ADE rows! Expected ${adeRecords.length}, got ${adeInResults}`);
+        console.error("   This should never happen - all ADE rows must have a status");
+      }
+      
+      if (gestInResults !== gestRecords.length) {
+        console.error(`❌ INTEGRITY VIOLATION: Missing GEST rows! Expected ${gestRecords.length}, got ${gestInResults}`);
+        console.error("   This should never happen - all GEST rows must have a status");
+      }
+      
+      if (adeInResults === adeRecords.length && gestInResults === gestRecords.length) {
+        console.log("   ✅ INTEGRITY CHECK PASSED: All rows accounted for");
+      }
+      
+      // Count by status to verify classification
+      const statusCounts = {
+        MATCH_OK: 0,
+        MATCH_FIX: 0,
+        MANUAL_MATCH: 0,
+        SOLO_ADE: 0,
+        SOLO_GEST: 0,
+        OTHER: 0
+      };
+      
+      lastResults.forEach(r => {
+        if (r.STATUS === "MATCH_OK") statusCounts.MATCH_OK++;
+        else if (r.STATUS === "MATCH_FIX") statusCounts.MATCH_FIX++;
+        else if (r.STATUS === "MANUAL_MATCH") statusCounts.MANUAL_MATCH++;
+        else if (r.STATUS === "SOLO_ADE") statusCounts.SOLO_ADE++;
+        else if (r.STATUS === "SOLO_GEST") statusCounts.SOLO_GEST++;
+        else statusCounts.OTHER++;
+      });
+      
+      console.log("   Status Distribution:");
+      console.log(`     MATCH_OK: ${statusCounts.MATCH_OK}`);
+      console.log(`     MATCH_FIX: ${statusCounts.MATCH_FIX}`);
+      console.log(`     MANUAL_MATCH: ${statusCounts.MANUAL_MATCH}`);
+      console.log(`     SOLO_ADE: ${statusCounts.SOLO_ADE}`);
+      console.log(`     SOLO_GEST: ${statusCounts.SOLO_GEST}`);
+      if (statusCounts.OTHER > 0) {
+        console.warn(`     ⚠️ UNKNOWN STATUS: ${statusCounts.OTHER}`);
+      }
       
       nextResultId = 1;
       lastResults.forEach(r => {
