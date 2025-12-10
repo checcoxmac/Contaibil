@@ -69,7 +69,11 @@ window.addEventListener("DOMContentLoaded", () => {
     
     // Lunghezza P.IVA italiana
     PIVA_IT_LENGTH: 11,
-    PIVA_IT_MIN_VALUE: 10000000000   // 10 miliardi (per riconoscere P.IVA come numero)
+    PIVA_IT_MIN_VALUE: 10000000000,  // 10 miliardi (per riconoscere P.IVA come numero)
+    
+    // Debug mode configuration
+    DEBUG_ENABLED: false,            // Set to true to enable debug logging
+    DEBUG_SAMPLE_SIZE: 10            // Number of ADE rows to debug (when enabled)
   };
 
   // ============================================================
@@ -809,6 +813,25 @@ function formatDateForUI(dateObj) {
       // Fallback
       const num = parseFloat(s);
       return isNaN(num) ? 0.0 : num;
+  }
+
+  // ============================================================
+  // 💰 NORMALIZZAZIONE IMPORTI CON TOLLERANZA
+  // ============================================================
+  
+  /**
+   * Normalizza un importo con gestione della tolleranza
+   * @param {*} value - Valore da normalizzare
+   * @param {number} tolerance - Tolleranza per arrotondamento (default: 0.01)
+   * @returns {number} - Importo normalizzato
+   */
+  function normalizeAmount(value, tolerance = MATCH_CONFIG.TOLERANCE_EXACT) {
+    const num = parseNumberIT(value);
+    // Arrotonda al centesimo più vicino se la tolleranza è il default
+    if (tolerance === MATCH_CONFIG.TOLERANCE_EXACT) {
+      return Math.round(num * 100) / 100;
+    }
+    return num;
   }
 
   // ============================================================
@@ -2637,14 +2660,71 @@ function classifyMatchNote(diffTotale, adeRecord, gestRecord, ncInfo, criterio) 
   return { status, note };
 }
 
-function matchRecords(adeList, gestList) {
-  const ade = adeList
-    .filter(r => !r.isForeign)    // <-- niente P.IVA estera ADE
-    .map((r, idx) => ({ idx, ...r }));
+// ============================================================
+// 🎯 HELPER FUNCTIONS FOR ROBUST MATCHING
+// ============================================================
 
-  const gest = gestList
-    .filter(r => !r.isForeign)    // <-- niente P.IVA estera Gest
-    .map((r, idx) => ({ idx, ...r }));
+/**
+ * Debug logging for ADE record matching (enabled by MATCH_CONFIG.DEBUG_ENABLED)
+ */
+function debugLogAdeRecord(adeRecord, idx, totalAde) {
+  if (!MATCH_CONFIG.DEBUG_ENABLED) return;
+  if (idx >= MATCH_CONFIG.DEBUG_SAMPLE_SIZE) return;
+  
+  console.log(`\n🐛 DEBUG ADE Record [${idx + 1}/${totalAde}]:`);
+  console.log(`  Raw Data:`, {
+    num: adeRecord.num,
+    den: adeRecord.den,
+    piva: adeRecord.piva,
+    date: adeRecord.dataStr,
+    tot: adeRecord.tot
+  });
+  console.log(`  Normalized:`, {
+    numStrict: normalizeInvoiceNumber(adeRecord.num, true),
+    numDigits: normalizeInvoiceNumber(adeRecord.num, false),
+    denNorm: adeRecord.denNorm,
+    pivaDigits: adeRecord.pivaDigits,
+    isForeign: adeRecord.isForeign
+  });
+}
+
+/**
+ * Debug logging for match decision
+ */
+function debugLogMatchDecision(adeRecord, candidates, decision, idx) {
+  if (!MATCH_CONFIG.DEBUG_ENABLED) return;
+  if (idx >= MATCH_CONFIG.DEBUG_SAMPLE_SIZE) return;
+  
+  console.log(`  Candidates found: ${candidates.length}`);
+  candidates.forEach((c, i) => {
+    console.log(`    [${i + 1}] GEST num=${c.num}, tot=${c.tot}, criterio=${c.criterio || 'unknown'}`);
+  });
+  console.log(`  Decision: ${decision}`);
+}
+
+/**
+ * Finds all matching gestionale records for an ADE record at a given match level
+ */
+function findAllMatchesForLevel(adeRecord, gestList, matchedGest, matchFunction) {
+  const candidates = [];
+  
+  for (const g of gestList) {
+    if (matchedGest.has(g.idx)) continue;
+    if (matchFunction(adeRecord, g)) {
+      candidates.push(g);
+    }
+  }
+  
+  return candidates;
+}
+
+function matchRecords(adeList, gestList) {
+  // ============================================================
+  // 🆕 INCLUDE FOREIGN RECORDS IN PIPELINE
+  // They will be classified as unmatched if they don't match
+  // ============================================================
+  const ade = adeList.map((r, idx) => ({ idx, ...r }));
+  const gest = gestList.map((r, idx) => ({ idx, ...r }));
 
   const matchedAde = new Set();
   const matchedGest = new Set();
@@ -2674,11 +2754,39 @@ function matchRecords(adeList, gestList) {
         DIFF_TOTALE: diffTotale,
         ORIGINE: "MATCH",
         NOTE_MATCH: classification.note,
-        FLAG_REVISIONE: ""  // Inizializzato vuoto, sarà popolato dal post-processing
+        FLAG_REVISIONE: "",  // Inizializzato vuoto, sarà popolato dal post-processing
+        matchId: g.idx  // Store the matched gestionale record ID
       };
       
       results.push(record);
       return record;  // Restituisce il record creato per permettere modifiche successive
+    }
+
+    function addMultiMatch(a, candidates, criterio) {
+      matchedAde.add(a.idx);
+      // Mark all candidates as matched
+      candidates.forEach(g => matchedGest.add(g.idx));
+
+      const candidateIds = candidates.map(g => g.idx);
+      const candidateInfo = candidates.map(g => 
+        `num=${g.num}, tot=${g.tot}, den=${g.den}`
+      ).join(' | ');
+
+      const record = {
+        ADE: a,
+        GEST: null,  // No single GEST record for multi-match
+        STATUS: "MULTI_MATCH",
+        CRITERIO: criterio,
+        DIFF_TOTALE: 0,
+        ORIGINE: "MULTI_MATCH",
+        NOTE_MATCH: `⚠️ MULTIPLE MATCHES FOUND: ${candidates.length} gestionale records match this ADE record. Candidates: ${candidateInfo}. Manual review required.`,
+        FLAG_REVISIONE: "DA_REVISIONARE",
+        candidateIds: candidateIds,
+        candidates: candidates  // Store all candidate records
+      };
+      
+      results.push(record);
+      return record;
     }
 
     function totEqual(aTot, gTot, toll = 0.05) {
@@ -2695,86 +2803,85 @@ function matchRecords(adeList, gestList) {
     // ==========================================
     // 🎯 LIVELLO L1: MATCH ESATTO FORTE
     // Numero esatto + P.IVA esatta + Totale esatto
+    // With multi-match detection
     // ==========================================
-    for (const a of ade) {
+    for (let idx = 0; idx < ade.length; idx++) {
+      const a = ade[idx];
       if (matchedAde.has(a.idx)) continue;
 
-      const matchGest = gest.find(g => {
-        if (matchedGest.has(g.idx)) return false;
-        const match = isL1Match(a, g);
-        if (match && normalizePIVA(a.piva || "") === "8349560014") {
-          console.log(`🔍 L1 MATCH CA AUTO BANK: ${a.num} - diff €${Math.abs(a.tot - g.tot).toFixed(2)}`);
-        }
-        return match;
-      });
+      // Debug logging for first N ADE records
+      debugLogAdeRecord(a, idx, ade.length);
 
-      if (matchGest) {
-        addMatch(a, matchGest, "MATCH_OK", "L1_MATCH_ESATTO");
+      // Find ALL candidates at this level
+      const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL1Match);
+
+      // Debug logging
+      debugLogMatchDecision(a, candidates, 
+        candidates.length === 0 ? "no match" : 
+        candidates.length === 1 ? "single match" : 
+        `multi-match (${candidates.length})`, idx);
+
+      if (candidates.length === 1) {
+        addMatch(a, candidates[0], "MATCH_OK", "L1_MATCH_ESATTO");
+      } else if (candidates.length > 1) {
+        addMultiMatch(a, candidates, `L1_MULTI_MATCH (${candidates.length} candidates)`);
       }
+      // If no candidates, continue to next level
     }
 
     // ==========================================
     // 🎯 LIVELLO L2: MATCH ESATTO CON TOLLERANZA IMPORTO
     // Numero esatto + P.IVA esatta + Totale ±1 euro
+    // With multi-match detection
     // ==========================================
     for (const a of ade) {
       if (matchedAde.has(a.idx)) continue;
 
-      const matchGest = gest.find(g => {
-        if (matchedGest.has(g.idx)) return false;
-        const match = isL2Match(a, g);
-        if (match && normalizePIVA(a.piva || "") === "8349560014") {
-          console.log(`🔍 L2 MATCH CA AUTO BANK: ${a.num} - diff €${Math.abs(a.tot - g.tot).toFixed(2)}`);
-        }
-        return match;
-      });
+      // Find ALL candidates at this level
+      const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL2Match);
 
-      if (matchGest) {
-        const diff = Math.abs(a.tot - matchGest.tot);
+      if (candidates.length === 1) {
+        const diff = Math.abs(a.tot - candidates[0].tot);
         const note = diff > 0.01 ? `Diff. €${diff.toFixed(2)}` : "";
-        addMatch(a, matchGest, "MATCH_OK", `L2_IMPORTO_TOLLERATO ${note}`.trim());
+        addMatch(a, candidates[0], "MATCH_OK", `L2_IMPORTO_TOLLERATO ${note}`.trim());
+      } else if (candidates.length > 1) {
+        addMultiMatch(a, candidates, `L2_MULTI_MATCH (${candidates.length} candidates)`);
       }
     }
 
     // ==========================================
     // 🎯 LIVELLO L3: MATCH FUZZY SU NUMERO FATTURA
     // Numero fuzzy (prefissi/zeri) + P.IVA esatta + Totale ±1 euro
+    // With multi-match detection
     // ==========================================
     for (const a of ade) {
       if (matchedAde.has(a.idx)) continue;
 
-      const matchGest = gest.find(g => {
-        if (matchedGest.has(g.idx)) return false;
-        const match = isL3Match(a, g);
-        if (match && normalizePIVA(a.piva || "") === "8349560014") {
-          console.log(`🔍 L3 MATCH CA AUTO BANK: ${a.num} - diff €${Math.abs(a.tot - g.tot).toFixed(2)}`);
-        }
-        return match;
-      });
+      // Find ALL candidates at this level
+      const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL3Match);
 
-      if (matchGest) {
-        addMatch(a, matchGest, "MATCH_OK", "L3_NUMERO_FUZZY");
+      if (candidates.length === 1) {
+        addMatch(a, candidates[0], "MATCH_OK", "L3_NUMERO_FUZZY");
+      } else if (candidates.length > 1) {
+        addMultiMatch(a, candidates, `L3_MULTI_MATCH (${candidates.length} candidates)`);
       }
     }
 
     // ==========================================
     // 🎯 LIVELLO L4: MATCH PER P.IVA + TOTALE + DATA
     // Quando numero non affidabile: P.IVA + importo + data ±3gg
+    // With multi-match detection
     // ==========================================
     for (const a of ade) {
       if (matchedAde.has(a.idx)) continue;
 
-      const matchGest = gest.find(g => {
-        if (matchedGest.has(g.idx)) return false;
-        const match = isL4Match(a, g);
-        if (match && normalizePIVA(a.piva || "") === "8349560014") {
-          console.log(`🔍 L4 MATCH CA AUTO BANK: ${a.num} - diff €${Math.abs(a.tot - g.tot).toFixed(2)}`);
-        }
-        return match;
-      });
+      // Find ALL candidates at this level
+      const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL4Match);
 
-      if (matchGest) {
-        addMatch(a, matchGest, "MATCH_OK", "L4_FORNITORE_DATA_TOTALE");
+      if (candidates.length === 1) {
+        addMatch(a, candidates[0], "MATCH_OK", "L4_FORNITORE_DATA_TOTALE");
+      } else if (candidates.length > 1) {
+        addMultiMatch(a, candidates, `L4_MULTI_MATCH (${candidates.length} candidates)`);
       }
     }
 
@@ -3322,19 +3429,25 @@ function matchRecords(adeList, gestList) {
 
     // ==========================================
     // 🧠 GESTIONE RIGHE NON MATCHATE (SOLO_ADE / SOLO_GEST)
+    // ✅ NOW INCLUDES FOREIGN RECORDS - they get classified as unmatched
     // Aggiungi NOTE_MATCH descrittive per i casi non associabili
     // ==========================================
     for (const a of ade) {
       if (!matchedAde.has(a.idx)) {
-        // Riga presente SOLO in ADE
+        // Riga presente SOLO in ADE (including foreign records)
         const origine = "SOLO_ADE";
-        const note = "Presente solo in ADE (manca nel gestionale).";
+        let note = "Presente solo in ADE (manca nel gestionale).";
+        
+        // Add foreign flag to note if applicable
+        if (a.isForeign) {
+          note += " [P.IVA ESTERA - fuori perimetro matching standard]";
+        }
         
         results.push({ 
           ADE: a, 
           GEST: null, 
-          STATUS: "SOLO_ADE",  // 🔴 STATUS rimane SOLO_ADE per compatibilità con filtri
-          CRITERIO: "NO_MATCH",
+          STATUS: "SOLO_ADE",  // 🔴 STATUS: unmatched ADE record
+          CRITERIO: a.isForeign ? "NO_MATCH_FOREIGN" : "NO_MATCH",
           NOTE_MATCH: note,
           ORIGINE: origine,
           DIFF_TOTALE: 0  // Non applicabile per righe non matchate
@@ -3343,15 +3456,20 @@ function matchRecords(adeList, gestList) {
     }
     for (const g of gest) {
       if (!matchedGest.has(g.idx)) {
-        // Riga presente SOLO nel Gestionale
+        // Riga presente SOLO nel Gestionale (including foreign records)
         const origine = "SOLO_GESTIONALE";
-        const note = "Presente solo nel gestionale (manca in ADE).";
+        let note = "Presente solo nel gestionale (manca in ADE).";
+        
+        // Add foreign flag to note if applicable
+        if (g.isForeign) {
+          note += " [P.IVA ESTERA - fuori perimetro matching standard]";
+        }
         
         results.push({ 
           ADE: null, 
           GEST: g, 
-          STATUS: "SOLO_GEST",  // 🔴 STATUS rimane SOLO_GEST per compatibilità con filtri
-          CRITERIO: "NO_MATCH",
+          STATUS: "SOLO_GEST",  // 🔴 STATUS: unmatched GEST record
+          CRITERIO: g.isForeign ? "NO_MATCH_FOREIGN" : "NO_MATCH",
           NOTE_MATCH: note,
           ORIGINE: origine,
           DIFF_TOTALE: 0  // Non applicabile per righe non matchate
@@ -3377,6 +3495,8 @@ function matchRecords(adeList, gestList) {
       // Garantisce che ORIGINE rispecchi sempre STATUS
       if (r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX") {
         r.ORIGINE = "MATCH";
+      } else if (r.STATUS === "MULTI_MATCH") {
+        r.ORIGINE = "MULTI_MATCH";
       } else if (r.STATUS === "SOLO_GEST") {
         r.ORIGINE = "SOLO_GESTIONALE";
       } else if (r.STATUS === "SOLO_ADE") {
@@ -3386,6 +3506,29 @@ function matchRecords(adeList, gestList) {
         console.warn(`⚠️ Record con STATUS sconosciuto: "${r.STATUS}" - possibile bug nel matching`, r);
         r.ORIGINE = "UNKNOWN";
       }
+    }
+
+    // ============================================================
+    // ✅ INTEGRITY CHECK: Verify all ADE records are classified
+    // ============================================================
+    const totalAdeRecords = adeList.length;
+    const matchedCount = results.filter(r => r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX").length;
+    const unmatchedCount = results.filter(r => r.STATUS === "SOLO_ADE").length;
+    const multiMatchCount = results.filter(r => r.STATUS === "MULTI_MATCH").length;
+    const totalClassified = matchedCount + unmatchedCount + multiMatchCount;
+    
+    console.log(`\n✅ INTEGRITY CHECK:`);
+    console.log(`   Total ADE records: ${totalAdeRecords}`);
+    console.log(`   Matched: ${matchedCount}`);
+    console.log(`   Unmatched: ${unmatchedCount}`);
+    console.log(`   Multi-match: ${multiMatchCount}`);
+    console.log(`   Total classified: ${totalClassified}`);
+    
+    if (totalAdeRecords !== totalClassified) {
+      console.error(`❌ INTEGRITY ERROR: Total ADE (${totalAdeRecords}) ≠ Classified (${totalClassified})`);
+      console.error(`   Missing: ${totalAdeRecords - totalClassified} records`);
+    } else {
+      console.log(`   ✅ All ADE records classified correctly`);
     }
 
     return results;
@@ -3720,11 +3863,12 @@ function matchRecords(adeList, gestList) {
 
     const full = fullResultsForCounts || resultsToRender;
 
-    let cntOk = 0, cntFix = 0, cntAde = 0, cntGest = 0;
+    let cntOk = 0, cntFix = 0, cntAde = 0, cntGest = 0, cntMulti = 0;
     for (const row of full) {
       if (row.deleted) continue;
       if (row.STATUS === "MATCH_OK") cntOk++;
       else if (row.STATUS === "MATCH_FIX") cntFix++;
+      else if (row.STATUS === "MULTI_MATCH") cntMulti++;
       else if (row.STATUS === "SOLO_ADE") cntAde++;
       else if (row.STATUS === "SOLO_GEST") cntGest++;
     }
@@ -3743,6 +3887,10 @@ function matchRecords(adeList, gestList) {
         cls = "status-match-fix";
         pillClass = "pill-fix";
         pillText = "MATCH DA CORREGGERE";
+      } else if (row.STATUS === "MULTI_MATCH") {
+        cls = "status-multi-match";
+        pillClass = "pill-multi";
+        pillText = `MULTI-MATCH (${row.candidateIds?.length || 0} candidati)`;
       } else if (row.STATUS === "SOLO_ADE") {
         cls = "status-solo-ade";
         pillClass = "pill-ade";
@@ -3851,6 +3999,12 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     document.getElementById("cntFix").textContent = cntFix;
     document.getElementById("cntAde").textContent = cntAde;
     document.getElementById("cntGest").textContent = cntGest;
+    
+    // Update multi-match counter (if element exists)
+    const cntMultiEl = document.getElementById("cntMulti");
+    if (cntMultiEl) {
+      cntMultiEl.textContent = cntMulti;
+    }
 
     // ============================================================
     // ANALISI GUIDATA SOLO GESTIONALE (Miglioramento Dic 2025)
@@ -3908,7 +4062,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 
     document.getElementById("statusText").textContent =
       `Confronto completato: ${total} righe attive ` +
-      `(OK: ${cntOk}, Da correggere: ${cntFix}, Solo ADE: ${cntAde}, Solo Gest.: ${cntGest}) ` +
+      `(OK: ${cntOk}, Da correggere: ${cntFix}, Multi-match: ${cntMulti}, Solo ADE: ${cntAde}, Solo Gest.: ${cntGest}) ` +
       `| Fatture ADE caricate: ${adeCount} | Righe gestionali caricate: ${gestCount}`;
     
     // Attiva il ridimensionamento sulla tabella appena renderizzata
