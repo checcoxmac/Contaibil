@@ -170,7 +170,7 @@ const ThemeManager = {
   // ============================================================
   // 🐛 DEBUG LOGGING HELPER
   // ============================================================
-  let debugRowCounter = 0;  // Counter for debug logging
+  let debugRowCounter = 0;  // Counter for debug logging (reset per parsing session)
   
   function debugLog(category, message, data = null) {
     if (!DEBUG_CONFIG.ENABLED) return;
@@ -186,7 +186,8 @@ const ThemeManager = {
     
     if (!categoryMap[category]) return;
     
-    // Check if we're within sample size limit
+    // Check if we're within sample size limit (0 = log all)
+    // Use >= to log exactly SAMPLE_SIZE rows (1 to SAMPLE_SIZE inclusive)
     if (DEBUG_CONFIG.SAMPLE_SIZE > 0 && debugRowCounter > DEBUG_CONFIG.SAMPLE_SIZE) return;
     
     const prefix = `🐛 DEBUG [${category.toUpperCase()}]`;
@@ -2738,7 +2739,8 @@ function matchRecords(adeList, gestList) {
       if (matchedAde.has(a.idx)) continue;
 
       // ===== DEBUG LOGGING: CANDIDATES =====
-      if (DEBUG_CONFIG.ENABLED && debugRowCounter <= DEBUG_CONFIG.SAMPLE_SIZE) {
+      // Use same check as debugLog: only log if within sample size or sample size is 0
+      if (DEBUG_CONFIG.ENABLED && (DEBUG_CONFIG.SAMPLE_SIZE === 0 || debugRowCounter <= DEBUG_CONFIG.SAMPLE_SIZE)) {
         const candidates = gest.filter(g => {
           if (matchedGest.has(g.idx)) return false;
           return isL1Match(a, g);
@@ -3520,13 +3522,14 @@ function matchRecords(adeList, gestList) {
     console.log(`🔢 EXPECTED: ${expectedResults} (${totalAdeInput} ADE all + ${unmatchedGestCount} unmatched GEST)`);
     
     // Verify integrity: Every ADE row (including foreign) should appear in results
-    const adeInResults = matchedCount + (unmatchedAdeCount - foreignAdeCount); // Domestic ADE in results
-    const totalAdeInResults = adeInResults + foreignAdeCount;  // All ADE in results
+    // Count ADE rows in results (both matched and unmatched)
+    const adeRowsInResults = results.filter(r => r.ADE !== null).length;
     
-    if (totalAdeInResults !== totalAdeInput) {
-      console.error(`❌ INTEGRITY ERROR: ADE rows in results (${totalAdeInResults}) != Total ADE input (${totalAdeInput})`);
-      console.error(`   Matched: ${matchedCount}, Unmatched domestic: ${unmatchedAdeCount - foreignAdeCount}, Foreign: ${foreignAdeCount}, Total: ${totalAdeInput}`);
-      console.error(`   Difference: ${Math.abs(totalAdeInResults - totalAdeInput)} rows missing!`);
+    if (adeRowsInResults !== totalAdeInput) {
+      console.error(`❌ INTEGRITY ERROR: ADE rows in results (${adeRowsInResults}) != Total ADE input (${totalAdeInput})`);
+      console.error(`   Matched: ${matchedCount}, Unmatched (SOLO_ADE): ${unmatchedAdeCount}`);
+      console.error(`   Sum: ${matchedCount + unmatchedAdeCount}, Expected: ${totalAdeInput}`);
+      console.error(`   Difference: ${Math.abs(adeRowsInResults - totalAdeInput)} rows missing!`);
     } else {
       console.log(`✅ INTEGRITY CHECK PASSED: All ${totalAdeInput} ADE rows accounted for (${totalAdeFiltered} domestic + ${foreignAdeCount} foreign)`);
     }
