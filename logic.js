@@ -821,6 +821,10 @@ function formatDateForUI(dateObj) {
   
   /**
    * Normalizza un importo con gestione della tolleranza
+   * NOTE: Currently, matching logic uses parseNumberIT() directly with amountsMatch()
+   * for tolerance comparison. This function is provided for future use cases where
+   * pre-normalized amounts might be needed (e.g., for display or storage).
+   * 
    * @param {*} value - Valore da normalizzare
    * @param {number} tolerance - Tolleranza per arrotondamento (default: 0.01)
    * @returns {number} - Importo normalizzato
@@ -2704,6 +2708,11 @@ function debugLogMatchDecision(adeRecord, candidates, decision, idx) {
 
 /**
  * Finds all matching gestionale records for an ADE record at a given match level
+ * @param {Object} adeRecord - The ADE record to match
+ * @param {Array} gestList - List of all gestionale records
+ * @param {Set} matchedGest - Set of already matched gestionale record indices
+ * @param {Function} matchFunction - Function to test if an ADE and GEST record match (e.g., isL1Match)
+ * @returns {Array} - Array of matching gestionale records (empty if none found)
  */
 function findAllMatchesForLevel(adeRecord, gestList, matchedGest, matchFunction) {
   const candidates = [];
@@ -2834,11 +2843,18 @@ function matchRecords(adeList, gestList) {
     // Numero esatto + P.IVA esatta + Totale ±1 euro
     // With multi-match detection
     // ==========================================
-    for (const a of ade) {
+    for (let idx = 0; idx < ade.length; idx++) {
+      const a = ade[idx];
       if (matchedAde.has(a.idx)) continue;
 
       // Find ALL candidates at this level
       const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL2Match);
+
+      // Debug logging
+      if (MATCH_CONFIG.DEBUG_ENABLED && idx < MATCH_CONFIG.DEBUG_SAMPLE_SIZE && candidates.length > 0) {
+        debugLogMatchDecision(a, candidates, 
+          candidates.length === 1 ? "L2 single match" : `L2 multi-match (${candidates.length})`, idx);
+      }
 
       if (candidates.length === 1) {
         const diff = Math.abs(a.tot - candidates[0].tot);
@@ -2854,11 +2870,18 @@ function matchRecords(adeList, gestList) {
     // Numero fuzzy (prefissi/zeri) + P.IVA esatta + Totale ±1 euro
     // With multi-match detection
     // ==========================================
-    for (const a of ade) {
+    for (let idx = 0; idx < ade.length; idx++) {
+      const a = ade[idx];
       if (matchedAde.has(a.idx)) continue;
 
       // Find ALL candidates at this level
       const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL3Match);
+
+      // Debug logging
+      if (MATCH_CONFIG.DEBUG_ENABLED && idx < MATCH_CONFIG.DEBUG_SAMPLE_SIZE && candidates.length > 0) {
+        debugLogMatchDecision(a, candidates, 
+          candidates.length === 1 ? "L3 single match" : `L3 multi-match (${candidates.length})`, idx);
+      }
 
       if (candidates.length === 1) {
         addMatch(a, candidates[0], "MATCH_OK", "L3_NUMERO_FUZZY");
@@ -2872,11 +2895,18 @@ function matchRecords(adeList, gestList) {
     // Quando numero non affidabile: P.IVA + importo + data ±3gg
     // With multi-match detection
     // ==========================================
-    for (const a of ade) {
+    for (let idx = 0; idx < ade.length; idx++) {
+      const a = ade[idx];
       if (matchedAde.has(a.idx)) continue;
 
       // Find ALL candidates at this level
       const candidates = findAllMatchesForLevel(a, gest, matchedGest, isL4Match);
+
+      // Debug logging
+      if (MATCH_CONFIG.DEBUG_ENABLED && idx < MATCH_CONFIG.DEBUG_SAMPLE_SIZE && candidates.length > 0) {
+        debugLogMatchDecision(a, candidates, 
+          candidates.length === 1 ? "L4 single match" : `L4 multi-match (${candidates.length})`, idx);
+      }
 
       if (candidates.length === 1) {
         addMatch(a, candidates[0], "MATCH_OK", "L4_FORNITORE_DATA_TOTALE");
@@ -3512,16 +3542,26 @@ function matchRecords(adeList, gestList) {
     // ✅ INTEGRITY CHECK: Verify all ADE records are classified
     // ============================================================
     const totalAdeRecords = adeList.length;
-    const matchedCount = results.filter(r => r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX").length;
-    const unmatchedCount = results.filter(r => r.STATUS === "SOLO_ADE").length;
-    const multiMatchCount = results.filter(r => r.STATUS === "MULTI_MATCH").length;
-    const totalClassified = matchedCount + unmatchedCount + multiMatchCount;
+    
+    // Optimize counting with single reduce operation
+    const counts = results.reduce((acc, r) => {
+      if (r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX") {
+        acc.matched++;
+      } else if (r.STATUS === "SOLO_ADE") {
+        acc.unmatched++;
+      } else if (r.STATUS === "MULTI_MATCH") {
+        acc.multiMatch++;
+      }
+      return acc;
+    }, { matched: 0, unmatched: 0, multiMatch: 0 });
+    
+    const totalClassified = counts.matched + counts.unmatched + counts.multiMatch;
     
     console.log(`\n✅ INTEGRITY CHECK:`);
     console.log(`   Total ADE records: ${totalAdeRecords}`);
-    console.log(`   Matched: ${matchedCount}`);
-    console.log(`   Unmatched: ${unmatchedCount}`);
-    console.log(`   Multi-match: ${multiMatchCount}`);
+    console.log(`   Matched: ${counts.matched}`);
+    console.log(`   Unmatched: ${counts.unmatched}`);
+    console.log(`   Multi-match: ${counts.multiMatch}`);
     console.log(`   Total classified: ${totalClassified}`);
     
     if (totalAdeRecords !== totalClassified) {
