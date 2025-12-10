@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contaibil - Riconciliazione ADE GESTIONALE</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Main container for the entire application -->
+    <div class="container">
+        <!-- Header section with title and branding -->
+        <header class="header">
+            <h1>Contaibil</h1>
+            <p class="subtitle">Riconciliazione ADE GESTIONALE + KPI</p>
+        </header>
+
+        <!-- Dashboard section displaying key performance indicators -->
+        <section class="dashboard">
+            <h2>Dashboard KPI</h2>
+            <div class="kpi-container">
+                <!-- Total invoices KPI card -->
+                <div class="kpi-card">
+                    <div class="kpi-icon">📊</div>
+                    <div class="kpi-content">
+                        <div class="kpi-label">Fatture Totali</div>
+                        <div class="kpi-value" id="kpi-total">0</div>
+                    </div>
+                </div>
+                
+                <!-- Matched invoices KPI card -->
+                <div class="kpi-card kpi-success">
+                    <div class="kpi-icon">✓</div>
+                    <div class="kpi-content">
+                        <div class="kpi-label">Corrispondenze</div>
+                        <div class="kpi-value" id="kpi-matched">0</div>
+                    </div>
+                </div>
+                
+                <!-- Mismatched invoices KPI card -->
+                <div class="kpi-card kpi-warning">
+                    <div class="kpi-icon">⚠</div>
+                    <div class="kpi-content">
+                        <div class="kpi-label">Discrepanze</div>
+                        <div class="kpi-value" id="kpi-mismatched">0</div>
+                    </div>
+                </div>
+                
+                <!-- Match percentage KPI card -->
+                <div class="kpi-card kpi-info">
+                    <div class="kpi-icon">%</div>
+                    <div class="kpi-content">
+                        <div class="kpi-label">Percentuale</div>
+                        <div class="kpi-value" id="kpi-percentage">0%</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- File upload section for invoice and accounting data -->
+        <section class="upload-section">
+            <h2>Carica File</h2>
+            <div class="upload-container">
+                <!-- Invoice file upload -->
+                <div class="upload-box">
+                    <label for="invoice-file" class="upload-label">
+                        <div class="upload-icon">📄</div>
+                        <span class="upload-text">Fatture ADE (XML/CSV)</span>
+                        <input type="file" id="invoice-file" accept=".xml,.csv" class="file-input">
+                    </label>
+                    <div class="file-info" id="invoice-info"></div>
+                </div>
+                
+                <!-- Accounting file upload -->
+                <div class="upload-box">
+                    <label for="accounting-file" class="upload-label">
+                        <div class="upload-icon">📋</div>
+                        <span class="upload-text">Dati Gestionali (XML/CSV)</span>
+                        <input type="file" id="accounting-file" accept=".xml,.csv" class="file-input">
+                    </label>
+                    <div class="file-info" id="accounting-info"></div>
+                </div>
+            </div>
+            
+            <!-- Compare button -->
+            <button id="compare-btn" class="btn-primary" disabled>
+                Confronta Dati
+            </button>
+        </section>
+
+        <!-- Comparison results section -->
+        <section class="results-section" id="results-section" style="display: none;">
+            <h2>Risultati Confronto</h2>
+            
+            <!-- Filter options -->
+            <div class="filter-container">
+                <label>
+                    <input type="radio" name="filter" value="all" checked>
+                    Tutti
+                </label>
+                <label>
+                    <input type="radio" name="filter" value="matched">
+                    Solo Corrispondenze
+                </label>
+                <label>
+                    <input type="radio" name="filter" value="mismatched">
+                    Solo Discrepanze
+                </label>
+            </div>
+            
+            <!-- Comparison table container -->
+            <div class="table-container">
+                <table class="comparison-table" id="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>N. Fattura</th>
+                            <th>Data</th>
+                            <th>Cliente</th>
+                            <th>Importo ADE</th>
+                            <th>Importo Gestionale</th>
+                            <th>Differenza</th>
+                            <th>Stato</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Table rows will be dynamically inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2025 Contaibil - Sistema di Riconciliazione</p>
+        </footer>
+    </div>
+
+    <!-- JavaScript modules -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

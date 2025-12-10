@@ -1,0 +1,8 @@
+invoice_number,date,customer,amount
+FAT-2025-001,2025-01-15,Azienda Alpha SRL,1250.00
+FAT-2025-002,2025-01-16,Beta Company SpA,890.50
+FAT-2025-003,2025-01-17,Gamma Industries,2150.75
+FAT-2025-004,2025-01-18,Delta Solutions,1800.00
+FAT-2025-005,2025-01-19,Epsilon Tech,3200.00
+FAT-2025-006,2025-01-20,Zeta Services,750.25
+FAT-2025-007,2025-01-21,Eta Consulting,1450.00
