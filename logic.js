@@ -824,11 +824,41 @@ function formatDateForUI(dateObj) {
    * @param {string} source - "ADE" o "GEST" per logging
    * @param {string} docId - Identificativo documento per logging
    * @returns {Object} - Documento con importi validati/corretti
+   * 
+   * IMPORTANTE: Per source="ADE", questa funzione NON modifica mai imp/iva,
+   * solo calcola tot se mancante. Gli importi ADE sono immutabili.
    */
   function fixAndValidateAmounts(doc, source, docId) {
     const { imp, iva, tot } = doc;
     let fixed = { ...doc };
     
+    // 🔒 REGOLA IMMUTABILITÀ ADE: NON modificare mai imponibile e IVA da ADE
+    if (source === "ADE") {
+      // Per ADE: mantieni imp e iva esattamente come letti dal file
+      // Calcola totale SOLO se mancante/nullo/zero
+      if (!tot || tot === 0) {
+        const calculatedTot = +(imp + iva).toFixed(2);
+        if (imp !== 0 || iva !== 0) {
+          console.log(`ℹ️ ADE [${docId}]: Totale mancante - calcolato da imp+iva: ${calculatedTot}`);
+          fixed.tot = calculatedTot;
+        }
+      }
+      // Se totale esiste, log diagnostico ma NON modificare
+      else {
+        const expectedTot = +(imp + iva).toFixed(2);
+        if (Math.abs(tot - expectedTot) > 0.50) {
+          console.warn(`⚠️ ADE [${docId}]: Discrepanza importi (mantenuto valore originale ADE)`);
+          console.warn(`   Imponibile ADE: ${imp}`);
+          console.warn(`   IVA ADE: ${iva}`);
+          console.warn(`   Totale ADE: ${tot}`);
+          console.warn(`   Totale calcolato (imp+iva): ${expectedTot}`);
+          console.warn(`   Differenza: ${(tot - expectedTot).toFixed(2)}€`);
+        }
+      }
+      return fixed;
+    }
+    
+    // Per GESTIONALE: logica originale con validazione e fix
     // 1. Calcola il totale atteso
     const expectedTot = +(imp + iva).toFixed(2);
     
@@ -1768,6 +1798,22 @@ function formatDateForUI(dateObj) {
 
   // ---------- build records ----------
 
+  // ============================================================
+  // 🔒 ADE PARSING - IMMUTABILITÀ IMPORTI (Dic 2025)
+  // ============================================================
+  // REGOLA FONDAMENTALE: Gli importi ADE (Imponibile, IVA) sono IMMUTABILI
+  // 
+  // 1. Imponibile e IVA vengono letti dal file ADE e MAI modificati
+  // 2. NON si ricalcola l'imponibile dall'IVA o viceversa
+  // 3. NON si correggono importi ADE usando aliquote
+  // 4. NON si sovrascrivono valori ADE con valori gestionale
+  // 5. Totale ADE:
+  //    - Se presente nel file (non-null/non-zero): usa quello
+  //    - Se mancante/null/zero: calcola come round(imponibile + iva, 2)
+  // 6. Durante il matching: confronta gestionale VS ADE immutabile
+  //    - Se ci sono differenze: marca status/note (es. MISMATCH_IMPORTI)
+  //    - NON modificare mai i valori ADE in base alle differenze
+  // ============================================================
   function buildAdeRecords(parsed) {
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
@@ -1938,23 +1984,45 @@ function formatDateForUI(dateObj) {
       });
     }
     
-    // ORA fai il parsing con il valore corretto
-    let imp = parseNumberIT(impRaw);
-    let iva = cleanIVAValue(ivaRaw, piva);
-    let tot = +(imp + iva).toFixed(2);
+    // ============================================================
+    // 🔒 PARSING IMPORTI ADE - VALORI IMMUTABILI (Dic 2025)
+    // ============================================================
+    // IMPORTANTE: Gli importi ADE sono UFFICIALI e NON vanno mai modificati
+    // - Imponibile: valore esatto dal file ADE (nessun ricalcolo)
+    // - IVA: valore esatto dal file ADE (nessun ricalcolo) 
+    // - Totale: se presente nel file usalo, altrimenti calcola imp+iva
+    //
+    // NON applicare:
+    // - Ricalcoli basati su aliquote IVA
+    // - Correzioni basate su confronti con gestionale
+    // - Deduzioni di imponibile da IVA o viceversa
+    // - Qualsiasi altra modifica ai valori originali
+    // ============================================================
+    
+    const imp = parseNumberIT(impRaw);  // 🔒 Immutabile: valore originale ADE
+    const iva = cleanIVAValue(ivaRaw, piva);  // 🔒 Immutabile: valore originale ADE (pulito da errori mapping P.IVA)
+    
+    // Totale: nel file ADE standard non c'è colonna Totale, quindi lo calcoliamo
+    // Se in futuro si mappa una colonna Totale ADE, usare quel valore se presente
+    let tot = 0;
     
     // 🔍 DEBUG: Valori dopo parsing
     if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
+      console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva} (valori ADE immutabili)`);
     }
     
-    // ✅ VALIDAZIONE IMPORTI
+    // ✅ VALIDAZIONE IMPORTI ADE
+    // Nota: fixAndValidateAmounts per ADE calcola SOLO il totale se mancante
+    // NON modifica mai imponibile o IVA
     const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
-    tot = validated.tot;
+    tot = validated.tot;  // Totale calcolato (imp+iva) o validato se presente
     
     // 🔍 DEBUG FINALE: Valori nel record
     if (num === "2528012466" || String(num).includes("2528012466")) {
-      console.log(`   ✅ RECORD FINALE: imp=${imp}, iva=${iva}, tot=${tot}`);
+      console.log(`   ✅ RECORD FINALE ADE:`);
+      console.log(`      imp=${imp} (immutabile - valore originale ADE)`);
+      console.log(`      iva=${iva} (immutabile - valore originale ADE)`);
+      console.log(`      tot=${tot} (calcolato: imp+iva arrotondato a 2 decimali)`);
       console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
