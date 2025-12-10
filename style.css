@@ -29,6 +29,8 @@
   --pill-ok-fg: #34C759;
   --pill-fix-bg: rgba(255, 149, 0, 0.15);
   --pill-fix-fg: #E57E00;
+  --pill-multi-bg: rgba(249, 115, 22, 0.15);
+  --pill-multi-fg: #f97316;
   --pill-ade-bg: rgba(255, 59, 48, 0.15);
   --pill-ade-fg: #D9362B;
   --pill-gest-bg: rgba(0, 122, 255, 0.15);
@@ -76,6 +78,8 @@ html[data-theme="dark"] {
   --pill-ok-fg: #30D158;
   --pill-fix-bg: rgba(255, 214, 10, 0.2);
   --pill-fix-fg: #FFD60A;
+  --pill-multi-bg: rgba(251, 146, 60, 0.2);
+  --pill-multi-fg: #fb923c;
   --pill-ade-bg: rgba(255, 69, 58, 0.2);
   --pill-ade-fg: #FF453A;
   --pill-gest-bg: rgba(10, 132, 255, 0.2);
@@ -663,6 +667,7 @@ input[type="file"]:hover::file-selector-button {
 
 .dot-green { background: var(--sys-tint-green); }
 .dot-yellow { background: var(--sys-tint-yellow); }
+.dot-orange { background: #f97316; }
 .dot-red { background: var(--sys-tint-red); }
 .dot-blue { background: var(--sys-tint-blue); }
 
@@ -814,7 +819,16 @@ tr.status-match-fix td {
   background: linear-gradient(90deg, var(--pill-fix-bg), transparent);
 }
 
+tr.status-multi-match td {
+  background: linear-gradient(90deg, var(--pill-multi-bg), transparent);
+}
+
 /* --- STATI RIGHE (RIMOSSI I GRADIENTI CHE FACEVANO L'EFFETTO TENDA) --- */
+/* Multi-match -> Arancione scuro piatto */
+tr.status-multi-match td {
+  background-color: rgba(60, 40, 20, 1) !important;
+  color: #ffddaa;
+}
 /* Solo ADE -> Rosso scuro piatto */
 tr.status-solo-ade td {
   background-color: rgba(60, 20, 20, 1) !important;
@@ -889,6 +903,12 @@ tr.match-source-row td {
 .pill-gest {
   background: var(--pill-gest-bg);
   color: var(--pill-gest-fg);
+  border: 1px solid;
+}
+
+.pill-multi {
+  background: var(--pill-multi-bg);
+  color: var(--pill-multi-fg);
   border: 1px solid;
 }
 
