@@ -78,12 +78,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const DEBUG_CONFIG = {
     // Enable/disable debug logging for ADE records
     ADE_DEBUG_ENABLED: false,        // Set to true to enable detailed ADE logging
-    ADE_DEBUG_SAMPLE_SIZE: 10,       // Number of first ADE rows to log in detail
-    
-    // Debug flags for specific scenarios
-    LOG_ADE_PARSING: false,          // Log each ADE record as it's parsed
-    LOG_ADE_MATCHING: false,         // Log ADE matching decisions
-    LOG_ADE_AMOUNTS: false           // Log amount calculations
+    ADE_DEBUG_SAMPLE_SIZE: 10        // Number of first ADE rows to log in detail
   };
 
   // ============================================================
@@ -1938,7 +1933,7 @@ function formatDateForUI(dateObj) {
     // 🔍 DEBUG: Valori dopo parsing (NO validation/fix)
     if (num === "2528012466" || String(num).includes("2528012466")) {
       console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
-      console.log(`   ⚠️ IMPORTANTE: Nessuna modifica ai valori ADE - mantenu immutabili`);
+      console.log(`   ⚠️ IMPORTANTE: Nessuna modifica ai valori ADE - mantenuti immutabili`);
       console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
@@ -3403,7 +3398,7 @@ function matchRecords(adeList, gestList) {
     // This includes foreign rows (isForeign) which should be at least unmatched
     const adeInputCount = adeList.length;
     const adeWithStatus = results.filter(r => r.ADE !== null);
-    const matched = results.filter(r => r.ADE && r.GEST && (r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX"));
+    const matched = results.filter(r => r.ADE && r.GEST && (r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX" || r.STATUS === "MANUAL_MATCH"));
     const unmatched = results.filter(r => r.ADE && !r.GEST && r.STATUS === "SOLO_ADE");
     
     // Note: multi_match would need to be tracked separately if we support multiple matches per ADE row
@@ -3413,7 +3408,7 @@ function matchRecords(adeList, gestList) {
     console.log(`\n🔍 ===== INTEGRITY CHECK: ADE Classification Coverage =====`);
     console.log(`   📥 ADE Input Count: ${adeInputCount}`);
     console.log(`   📊 ADE in Results: ${adeInResults}`);
-    console.log(`   ✅ Matched (MATCH_OK + MATCH_FIX): ${matched.length}`);
+    console.log(`   ✅ Matched (MATCH_OK + MATCH_FIX + MANUAL_MATCH): ${matched.length}`);
     console.log(`   ❌ Unmatched (SOLO_ADE): ${unmatched.length}`);
     console.log(`   🌍 Foreign rows (included in counts): ${adeList.filter(a => a.isForeign).length}`);
     
