@@ -3400,24 +3400,28 @@ function matchRecords(adeList, gestList) {
     const totalAdeInput = adeList.length;
     const totalAdeProcessed = ade.length; // ADE dopo filtro foreign
     
-    // Conta gli status dei risultati
-    const matchedCount = results.filter(r => r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX").length;
-    const unmatchedAdeCount = results.filter(r => r.STATUS === "SOLO_ADE").length;
+    // Conta gli status dei risultati (separando matched/unmatched/foreign)
+    const matchedAdeCount = results.filter(r => 
+      (r.STATUS === "MATCH_OK" || r.STATUS === "MATCH_FIX") && r.ADE
+    ).length;
+    const unmatchedAdeInScope = results.filter(r => 
+      r.STATUS === "SOLO_ADE" && r.ADE && !r.ADE.isForeign
+    ).length;
+    const unmatchedAdeForeign = results.filter(r => 
+      r.STATUS === "SOLO_ADE" && r.ADE && r.ADE.isForeign
+    ).length;
     const unmatchedGestCount = results.filter(r => r.STATUS === "SOLO_GEST").length;
     
-    // Include foreign records come unmatched se non già presenti
-    const foreignAdeCount = adeList.filter(r => r.isForeign).length;
-    const foreignGestCount = gestList.filter(r => r.isForeign).length;
-    
     // Total ADE records accounted for
-    const totalAdeAccountedFor = matchedCount + unmatchedAdeCount + foreignAdeCount;
+    const totalAdeAccountedFor = matchedAdeCount + unmatchedAdeInScope + unmatchedAdeForeign;
     
     console.log("📊 === CLASSIFICATION COVERAGE REPORT ===");
     console.log(`   Total ADE input: ${totalAdeInput}`);
     console.log(`   ADE in-scope (Italian): ${totalAdeProcessed}`);
-    console.log(`   ADE foreign (excluded): ${foreignAdeCount}`);
-    console.log(`   Matched (MATCH_OK + MATCH_FIX): ${matchedCount}`);
-    console.log(`   Unmatched (SOLO_ADE): ${unmatchedAdeCount}`);
+    console.log(`   ADE foreign (P.IVA estera): ${unmatchedAdeForeign}`);
+    console.log(`   Matched (MATCH_OK + MATCH_FIX): ${matchedAdeCount}`);
+    console.log(`   Unmatched in-scope (SOLO_ADE Italian): ${unmatchedAdeInScope}`);
+    console.log(`   Unmatched foreign (SOLO_ADE Foreign): ${unmatchedAdeForeign}`);
     console.log(`   Total accounted: ${totalAdeAccountedFor}`);
     
     // Integrity check
@@ -3432,6 +3436,7 @@ function matchRecords(adeList, gestList) {
     console.log("📊 === GEST CLASSIFICATION ===");
     console.log(`   Total GEST input: ${gestList.length}`);
     console.log(`   GEST in-scope (Italian): ${gest.length}`);
+    const foreignGestCount = gestList.filter(r => r.isForeign).length;
     console.log(`   GEST foreign (excluded): ${foreignGestCount}`);
     console.log(`   Unmatched (SOLO_GEST): ${unmatchedGestCount}`);
 
