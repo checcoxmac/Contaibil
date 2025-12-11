@@ -915,7 +915,11 @@ function formatDateForUI(dateObj) {
       console.log(`📋 VALIDATION LOG [${source}] [${docId}]:`, JSON.stringify(validationLog, null, 2));
     }
     
-    return fixed;
+    // Return both fixed values and validation metadata
+    return {
+      ...fixed,
+      _validation: Object.freeze(validationLog)
+    };
   }
 
   // ============================================================
@@ -2115,25 +2119,13 @@ function formatDateForUI(dateObj) {
       _parsed: true,
       _parseTimestamp: new Date().toISOString(),
       // Validation checksum to detect tampering
-      _checksum: calculateRecordChecksum(imp, iva, tot, num)
+      _checksum: calculateRecordChecksum(imp, iva, tot, num),
+      // Store validation results if any
+      _validation: validated._validation || null
     };
     
-    // Freeze critical financial fields to prevent mutation
-    Object.defineProperty(record, 'imp', {
-      value: imp,
-      writable: false,
-      configurable: false
-    });
-    Object.defineProperty(record, 'iva', {
-      value: iva,
-      writable: false,
-      configurable: false
-    });
-    Object.defineProperty(record, 'tot', {
-      value: tot,
-      writable: false,
-      configurable: false
-    });
+    // Freeze critical financial fields to prevent mutation using helper
+    freezeFinancialFields(record, ['imp', 'iva', 'tot']);
     
     recs.push(record);
   }
@@ -2147,7 +2139,27 @@ function formatDateForUI(dateObj) {
   // ============================================================
   
   /**
+   * Freeze financial fields to prevent mutation
+   * @param {Object} record - Record object to protect
+   * @param {Array} fields - Array of field names to freeze
+   * @returns {Object} Record with frozen fields
+   */
+  function freezeFinancialFields(record, fields) {
+    fields.forEach(field => {
+      if (record[field] !== undefined) {
+        Object.defineProperty(record, field, {
+          value: record[field],
+          writable: false,
+          configurable: false
+        });
+      }
+    });
+    return record;
+  }
+  
+  /**
    * Calculate checksum for record validation
+   * Enhanced hash function with better distribution to reduce collisions
    * @param {number} imp - Imponibile
    * @param {number} iva - Imposta
    * @param {number} tot - Totale
@@ -2156,14 +2168,16 @@ function formatDateForUI(dateObj) {
    */
   function calculateRecordChecksum(imp, iva, tot, num) {
     const str = `${imp}|${iva}|${tot}|${num}`;
-    // Simple hash function for validation
-    let hash = 0;
+    // Enhanced hash function with better collision resistance
+    let hash = 5381; // DJB2 algorithm constant
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+      hash = ((hash << 5) + hash) + char; // hash * 33 + char
     }
-    return Math.abs(hash).toString(16);
+    // Add additional mixing for better distribution
+    hash = hash ^ (hash >>> 16);
+    hash = Math.abs(hash);
+    return hash.toString(36); // Base-36 for shorter strings
   }
   
   /**
