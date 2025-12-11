@@ -69,7 +69,10 @@ window.addEventListener("DOMContentLoaded", () => {
     
     // Lunghezza P.IVA italiana
     PIVA_IT_LENGTH: 11,
-    PIVA_IT_MIN_VALUE: 10000000000   // 10 miliardi (per riconoscere P.IVA come numero)
+    PIVA_IT_MIN_VALUE: 10000000000,  // 10 miliardi (per riconoscere P.IVA come numero)
+    
+    // Soglia per rilevare inversione imponibile/IVA
+    IVA_RATIO_THRESHOLD: 0.6         // Se IVA > 60% imponibile, probabile inversione
   };
 
   // ============================================================
@@ -1949,10 +1952,10 @@ function formatDateForUI(dateObj) {
     }
     
     // 🔧 FIX: Check for inverted imponibile/imposta values
-    // If IVA is more than 60% of imponibile, they're likely swapped
+    // If IVA is more than threshold % of imponibile, they're likely swapped
     if (imp > 0 && iva > 0) {
       const ratio = iva / imp;
-      if (ratio > 0.6) {
+      if (ratio > MATCH_CONFIG.IVA_RATIO_THRESHOLD) {
         console.warn(
           `Imponibile/IVA mismatch detected (imp=${imp}, iva=${iva}). Swapping values.`
         );
