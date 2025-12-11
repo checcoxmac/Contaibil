@@ -171,7 +171,13 @@ const ThemeManager = {
     const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
     if (!lines.length) return { headers: [], rows: [] };
     const sep = lines[0].includes(";") ? ";" : ",";
-    const headers = lines[0].split(sep).map(h => h.replace(/"/g, '').trim());
+    const headers = lines[0].split(sep).map(h => {
+      return h
+        .replace(/^\uFEFF/, "")     // rimuove BOM UTF-8
+        .replace(/\u00A0/g, " ")     // NBSP -> spazio
+        .replace(/"/g, '')
+        .trim();
+    });
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
       const parts = lines[i].split(sep);
@@ -1454,144 +1460,168 @@ function formatDateForUI(dateObj) {
     return null;
   }
 
+  function worksheetToCsv(ws, isADE = false) {
+    // 🔧 CONVERSIONE MANUALE DATE E IMPORTI: processa ogni cella del worksheet
+    // File ADE: mantiene punto decimale (formato americano)
+    // File GEST: converte virgola decimale (formato italiano)
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+        const cell = ws[cellAddress];
+
+        if (cell && cell.t === 'n' && cell.v != null) {
+          const numValue = cell.v;
+
+          // CASO 1: Seriale Excel per DATE (tra 1 e 80000 E intero)
+          // Seriali Excel: 1 = 1/1/1900, 45000 ≈ 2023
+          // Importante: deve essere intero per distinguerlo da importi come 610.75
+          if (numValue >= 1 && numValue <= 80000 && Number.isInteger(numValue)) {
+            // Converti seriale Excel in Date JavaScript
+            const excelEpoch = new Date(1899, 11, 30);
+            const msPerDay = 24 * 60 * 60 * 1000;
+            const dateObj = new Date(excelEpoch.getTime() + numValue * msPerDay);
+
+            // Formatta in DD/MM/YYYY italiano
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const y = dateObj.getFullYear();
+
+            // Sovrascrivi il valore della cella con la stringa formattata
+            cell.t = 's'; // cambia tipo a stringa
+            cell.v = `${d}/${m}/${y}`;
+            cell.w = `${d}/${m}/${y}`;
+
+            delete cell.z; // rimuovi formato numero
+          }
+          // CASO 2: TUTTI gli altri numeri (importi, IVA, totali, quantità)
+          // Include sia decimali (610.75) che interi (887)
+          else {
+            let strValue;
+
+            if (isADE) {
+              // ⚠️ FILE ADE: mantieni formato AMERICANO con PUNTO decimale
+              // I file ADE dall'Agenzia delle Entrate hanno già il punto decimale
+              // Es: 195.14 → "195.14" (NO conversione)
+              strValue = numValue.toFixed(2);
+            } else {
+              // ✅ FILE GESTIONALE: converti in formato ITALIANO con VIRGOLA decimale
+              // Es: 887 → 887.00 → "887,00"
+              strValue = numValue.toFixed(2).replace('.', ',');
+            }
+
+            cell.t = 's'; // cambia tipo a stringa
+            cell.v = strValue;
+            cell.w = strValue;
+
+            delete cell.z; // rimuovi formato numero
+          }
+        }
+      }
+    }
+
+    // 🔧 FIX DEFINITIVO: Converti direttamente in JSON invece di CSV
+    // Evita problemi di shift colonne causati da delimitatori CSV malformati
+    console.log(`✅ Excel caricato - conversione diretta a JSON (bypass CSV)`);
+
+    const jsonData = XLSX.utils.sheet_to_json(ws, {
+      header: 1,        // Array di array (non oggetti)
+      raw: false,       // Usa valori formattati (stringhe)
+      defval: ""        // Celle vuote = stringa vuota
+    });
+
+    if (jsonData.length === 0) {
+      throw new Error("File Excel vuoto");
+    }
+
+    // Prima riga = headers, resto = dati
+    const headers = jsonData[0];
+    const rows = jsonData.slice(1);
+
+    // 🔍 DEBUG: Mostra headers e prima riga dati
+    console.log(`📋 HEADERS (${headers.length} colonne):`, headers);
+    if (rows.length > 0) {
+      console.log(`📋 PRIMA RIGA DATI:`, rows[0]);
+    }
+
+    // Cerca la riga con fattura 2528012466 per debug
+    if (isADE) {
+      const targetRow = rows.find(row => {
+        return row.some(cell => String(cell).includes('2528012466'));
+      });
+
+      if (targetRow) {
+        console.log("🔍 RIGA FATTURA 2528012466 DA EXCEL:");
+        headers.forEach((header, idx) => {
+          console.log(`   [${idx}] "${header}" = "${targetRow[idx] || ''}"`);
+        });
+      }
+    }
+
+    // Converti in formato CSV compatibile per il parsing esistente
+    const csvLines = [];
+    csvLines.push(headers.join(';'));
+    rows.forEach(row => {
+      csvLines.push(row.join(';'));
+    });
+
+    const csv = csvLines.join('\n');
+    const formatDesc = isADE ? "punto decimale (ADE)" : "virgola decimale (GEST)";
+    console.log(`📊 ${formatDesc} - Righe totali: ${rows.length}`);
+    return csv;
+  }
+
   function loadTableFromFile(file, isADE = false) {
     const name = file.name.toLowerCase();
+    const isXmlSpreadsheet = name.endsWith(".xml");
 
     if (name.endsWith(".csv")) {
       return file.text();
     }
 
-    if (name.endsWith(".xlsx")) {
+    if (name.endsWith(".xlsx") || isXmlSpreadsheet) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
+
         reader.onload = (e) => {
           try {
-            const data = new Uint8Array(e.target.result);
-            
-            // ✅ SOLUZIONE ROBUSTA: non usiamo cellDates per evitare conversioni locali automatiche
-            const wb = XLSX.read(data, { 
-              type: "array",
-              cellDates: false,  // Leggi i seriali Excel raw
-              cellNF: false
-            });
+            let wb;
+
+            if (isXmlSpreadsheet) {
+              // I file ADE originali arrivano spesso come SpreadsheetML (.xml)
+              const xmlText = typeof e.target.result === "string"
+                ? e.target.result
+                : new TextDecoder("utf-8").decode(e.target.result);
+
+              wb = XLSX.read(xmlText, {
+                type: "string",
+                cellDates: false,
+                cellNF: false
+              });
+            } else {
+              const data = new Uint8Array(e.target.result);
+              wb = XLSX.read(data, {
+                type: "array",
+                cellDates: false,
+                cellNF: false
+              });
+            }
+
             const sheetName = wb.SheetNames[0];
             const ws = wb.Sheets[sheetName];
-            
-            // 🔧 CONVERSIONE MANUALE DATE E IMPORTI: processa ogni cella del worksheet
-            // File ADE: mantiene punto decimale (formato americano)
-            // File GEST: converte virgola decimale (formato italiano)
-            const range = XLSX.utils.decode_range(ws['!ref']);
-            for (let R = range.s.r; R <= range.e.r; ++R) {
-              for (let C = range.s.c; C <= range.e.c; ++C) {
-                const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-                const cell = ws[cellAddress];
-                
-                if (cell && cell.t === 'n' && cell.v != null) {
-                  const numValue = cell.v;
-                  
-                  // CASO 1: Seriale Excel per DATE (tra 1 e 80000 E intero)
-                  // Seriali Excel: 1 = 1/1/1900, 45000 ≈ 2023
-                  // Importante: deve essere intero per distinguerlo da importi come 610.75
-                  if (numValue >= 1 && numValue <= 80000 && Number.isInteger(numValue)) {
-                    // Converti seriale Excel in Date JavaScript
-                    const excelEpoch = new Date(1899, 11, 30);
-                    const msPerDay = 24 * 60 * 60 * 1000;
-                    const dateObj = new Date(excelEpoch.getTime() + numValue * msPerDay);
-                    
-                    // Formatta in DD/MM/YYYY italiano
-                    const d = String(dateObj.getDate()).padStart(2, '0');
-                    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-                    const y = dateObj.getFullYear();
-                    
-                    // Sovrascrivi il valore della cella con la stringa formattata
-                    cell.t = 's'; // cambia tipo a stringa
-                    cell.v = `${d}/${m}/${y}`;
-                    cell.w = `${d}/${m}/${y}`;
-                    
-                    delete cell.z; // rimuovi formato numero
-                  }
-                  // CASO 2: TUTTI gli altri numeri (importi, IVA, totali, quantità)
-                  // Include sia decimali (610.75) che interi (887)
-                  else {
-                    let strValue;
-                    
-                    if (isADE) {
-                      // ⚠️ FILE ADE: mantieni formato AMERICANO con PUNTO decimale
-                      // I file ADE dall'Agenzia delle Entrate hanno già il punto decimale
-                      // Es: 195.14 → "195.14" (NO conversione)
-                      strValue = numValue.toFixed(2);
-                    } else {
-                      // ✅ FILE GESTIONALE: converti in formato ITALIANO con VIRGOLA decimale
-                      // Es: 887 → 887.00 → "887,00"
-                      strValue = numValue.toFixed(2).replace('.', ',');
-                    }
-                    
-                    cell.t = 's'; // cambia tipo a stringa
-                    cell.v = strValue;
-                    cell.w = strValue;
-                    
-                    delete cell.z; // rimuovi formato numero
-                  }
-                }
-              }
-            }
-            
-            // 🔧 FIX DEFINITIVO: Converti direttamente in JSON invece di CSV
-            // Evita problemi di shift colonne causati da delimitatori CSV malformati
-            console.log(`✅ Excel caricato - conversione diretta a JSON (bypass CSV)`);
-            
-            const jsonData = XLSX.utils.sheet_to_json(ws, {
-              header: 1,        // Array di array (non oggetti)
-              raw: false,       // Usa valori formattati (stringhe)
-              defval: ""        // Celle vuote = stringa vuota
-            });
-            
-            if (jsonData.length === 0) {
-              reject(new Error("File Excel vuoto"));
-              return;
-            }
-            
-            // Prima riga = headers, resto = dati
-            const headers = jsonData[0];
-            const rows = jsonData.slice(1);
-            
-            // 🔍 DEBUG: Mostra headers e prima riga dati
-            console.log(`📋 HEADERS (${headers.length} colonne):`, headers);
-            if (rows.length > 0) {
-              console.log(`📋 PRIMA RIGA DATI:`, rows[0]);
-            }
-            
-            // Cerca la riga con fattura 2528012466 per debug
-            if (isADE) {
-              const targetRow = rows.find(row => {
-                return row.some(cell => String(cell).includes('2528012466'));
-              });
-              
-              if (targetRow) {
-                console.log("🔍 RIGA FATTURA 2528012466 DA EXCEL:");
-                headers.forEach((header, idx) => {
-                  console.log(`   [${idx}] "${header}" = "${targetRow[idx] || ''}"`);
-                });
-              }
-            }
-            
-            // Converti in formato CSV compatibile per il parsing esistente
-            const csvLines = [];
-            csvLines.push(headers.join(';'));
-            rows.forEach(row => {
-              csvLines.push(row.join(';'));
-            });
-            
-            const csv = csvLines.join('\n');
-            const formatDesc = isADE ? "punto decimale (ADE)" : "virgola decimale (GEST)";
-            console.log(`📊 ${formatDesc} - Righe totali: ${rows.length}`);
+            const csv = worksheetToCsv(ws, isADE);
             resolve(csv);
           } catch (err) {
             reject(err);
           }
         };
+
         reader.onerror = reject;
-        reader.readAsArrayBuffer(file);
+        if (isXmlSpreadsheet) {
+          reader.readAsText(file);
+        } else {
+          reader.readAsArrayBuffer(file);
+        }
       });
     }
 
@@ -1746,7 +1776,8 @@ function formatDateForUI(dateObj) {
   function buildAdeRecords(parsed) {
     const normalizeAdeHeader = (name) =>
       String(name || "")
-        .replace(/\u00A0/g, " ")
+        .replace(/^\uFEFF/, "")    // BOM UTF-8
+        .replace(/\u00A0/g, " ")    // NBSP
         .replace(/\s+/g, " ")
         .trim()
         .toLowerCase();
@@ -1766,7 +1797,14 @@ function formatDateForUI(dateObj) {
   const cfg = getColumnConfig("ADE");
 
   const colNum   = cfg.num  || findCol(H, h, "numero fattura / documento", "numero fattura", "numero documento");
-  const colData  = cfg.data || findCol(H, h, "data emissione", "data fattura", "data registrazione");
+
+  // Forza sempre una colonna DATA con pattern espliciti, ignorando cfg.data sporche
+  const colData  = findCol(H, h, "data emissione", "data fattura", "data registrazione");
+  if (!colData || !String(colData).toLowerCase().includes("data")) {
+    const msg = "❌ Colonna DATA ADE non trovata: atteso 'Data emissione' / 'Data fattura'";
+    console.error(msg, H);
+    throw new Error(msg);
+  }
   const colPivaFor = cfg.piva || findCol(H, h, "partita iva fornitore", "partita iva cedente", "partita iva cedente / prestatore");
   const colPivaCli = findCol(H, h, "partita iva cliente");
   const colDenFor  = cfg.den || findCol(H, h, "denominazione fornitore", "denominazione cedente", "denominazione cedente / prestatore");
@@ -1779,9 +1817,8 @@ function formatDateForUI(dateObj) {
   // (così non rischiamo più di leggere colonne tipo "Aliquota IVA")
   // ============================================================
 
-  // ✅ Forziamo SEMPRE il mapping sugli header ufficiali ADE per l'imponibile,
-  //    ignorando eventuali config salvate (evita errori tipo "Aliquota IVA").
-  //    Normalizziamo gli header (trim, spazi multipli, NBSP) per evitare mismatch.
+  // ✅ Forziamo SEMPRE il mapping sugli header ufficiali ADE per Imponibile e Imposta
+  //    ignorando eventuali config salvate e normalizzando BOM/NBSP/spazi.
   let colImp = null;
   {
     const targetImp = normalizeAdeHeader("Imponibile/Importo (totale in euro)");
@@ -1790,18 +1827,14 @@ function formatDateForUI(dateObj) {
       colImp = H[idxImpAde];
       console.log(`✅ ADE Imponibile trovato con header normalizzato: colonna [${idxImpAde}] = "${colImp}"`);
     } else {
-      // Fallback: cerca case-insensitive con includes sugli header normalizzati
       const idxFallback = normH.findIndex(nh => nh.includes("imponibile/importo"));
       if (idxFallback !== -1) {
         colImp = H[idxFallback];
         console.log(`⚠️ ADE Imponibile trovato (fallback includes): colonna [${idxFallback}] = "${colImp}"`);
-      } else {
-        console.error(`❌ COLONNA IMPONIBILE ADE NON TROVATA! Header disponibili:`, H);
       }
     }
   }
 
-  // ✅ Stessa logica per l'IVA: usiamo sempre la colonna ufficiale ADE
   let colIva = null;
   {
     const targetIva = normalizeAdeHeader("Imposta (totale in euro)");
@@ -1814,10 +1847,17 @@ function formatDateForUI(dateObj) {
       if (idxFallback !== -1) {
         colIva = H[idxFallback];
         console.log(`⚠️ ADE IVA trovata (fallback includes): colonna [${idxFallback}] = "${colIva}"`);
-      } else {
-        console.error(`❌ COLONNA IVA ADE NON TROVATA! Header disponibili:`, H);
       }
     }
+  }
+
+  if (!colImp || !colIva) {
+    const missing = [];
+    if (!colImp) missing.push("Imponibile/Importo (totale in euro)");
+    if (!colIva) missing.push("Imposta (totale in euro)");
+    const msg = `❌ Colonne ADE mancanti: ${missing.join(", ")}. Verifica l'export ADE.`;
+    console.error(msg, H);
+    throw new Error(msg);
   }
   
   const colTipo  = findCol(H, h, "tipo documento");
@@ -1867,57 +1907,15 @@ function formatDateForUI(dateObj) {
     const data = parseDateFlexible(dataIso);                   // Oggetto Date per confronti (usa ISO già normalizzato)
     const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
-    // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
-    let impRaw = r[colImp] || "";
-    let ivaRaw = r[colIva] || "";
-    
-    // 🔧 AUTO-FIX PRE-PARSING (versione prudente)
-    if (
-      colImp && colData &&
-      colImp === colData &&
-      impRaw &&
-      String(impRaw).includes("/") &&
-      String(impRaw).match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
-    ) {
-      console.warn(`⚠️ ADE [${num}]: Imponibile contiene una DATA ("${impRaw}") sulla stessa colonna della data. Provo a cercare l'importo corretto...`);
+    // ===== GESTIONE IMPORTI (NESSUN AUTO-FIX) =====
+    const impRaw = r[colImp] || "";
+    const ivaRaw = r[colIva] || "";
 
-      let foundValue = null;
-      let foundCol = null;
-
-      for (let i = 0; i < H.length; i++) {
-        const colName = H[i];
-        const val = r[colName] || "";
-
-        if (String(val).includes("/")) continue;
-        if (String(val).length === 11 && !isNaN(val)) continue;
-
-        const lowerName = colName.toLowerCase();
-        if (lowerName.includes("data")) continue;
-        if (lowerName.includes("partita")) continue;
-        if (lowerName.includes("codice")) continue;
-
-        const numVal = parseNumberIT(val);
-        if (numVal >= 1 && numVal < 999999) {
-          foundValue = numVal;
-          foundCol = colName;
-          break;
-        }
-      }
-
-      if (foundValue !== null) {
-        console.log(`   ✅ CORRETTO IMPONIBILE ADE: uso ${foundValue} € da colonna "${foundCol}"`);
-        impRaw = String(foundValue);
-      } else {
-        console.error(`   ❌ Nessun valore numerico imponibile trovato nella riga ADE. Lascio imponibile = 0`);
-        impRaw = "0";
-      }
-    }
-
-    // 🔍 DEBUG: Log valori grezzi (DOPO auto-fix se necessario)
+    // 🔍 DEBUG: Log valori grezzi
     if (num === "2528012466" || String(num).includes("2528012466")) {
       console.log(`🔍 DEBUG ADE Fattura ${num} - LETTURA COLONNE:`);
       console.log(`   📊 Colonna Imponibile: "${colImp}"`);
-      console.log(`   📊 Valore grezzo (dopo auto-fix): "${impRaw}"`);
+      console.log(`   📊 Valore grezzo: "${impRaw}"`);
       console.log(`   📊 Colonna IVA: "${colIva}"`);
       console.log(`   📊 Valore grezzo IVA: "${ivaRaw}"`);
       
@@ -1935,6 +1933,10 @@ function formatDateForUI(dateObj) {
     // ➕/➖ Gestione segno: Note di credito negative, fatture positive
     let imp = impParsed;
     let iva = ivaParsed;
+
+    if (!tipoDocRaw) {
+      console.warn(`⚠️ ADE [${num}]: Tipo documento mancante/vuoto`);
+    }
 
     if (tipoDocRaw.includes("NOTA") || tipoDocRaw.includes("NC")) {
       // Nota di credito: imponibile e IVA devono essere negativi
@@ -1956,6 +1958,22 @@ function formatDateForUI(dateObj) {
     // ✅ VALIDAZIONE IMPORTI
     const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
     tot = validated.tot;
+
+    // 🚨 Validazione forte per imponibili sospettosamente bassi
+    if (imp <= 30 && (iva >= 100 || (imp + iva) >= 100)) {
+      console.error(`🚨 ADE [${num}] imponibile sospetto troppo basso rispetto all'IVA/totale`, {
+        num,
+        den,
+        piva,
+        imp,
+        iva,
+        tot,
+        colImp,
+        colIva,
+        tipoDoc: tipoDocRaw,
+        row: r
+      });
+    }
     
     // 🔍 DEBUG FINALE: Valori nel record
     if (num === "2528012466" || String(num).includes("2528012466")) {
@@ -1984,6 +2002,12 @@ function formatDateForUI(dateObj) {
       isForeign: isForeignPiva(piva)
     });
   }
+
+  // Check finale coerenza importi ADE (con NC negative)
+  const sumImp = recs.reduce((acc, r) => acc + (r.imp || 0), 0);
+  const sumIva = recs.reduce((acc, r) => acc + (r.iva || 0), 0);
+  console.log("✅ ADE check interno - somma imponibile (con NC negative):", sumImp.toFixed(2));
+  console.log("✅ ADE check interno - somma IVA (con NC negative):", sumIva.toFixed(2));
 
   return recs;
 }
