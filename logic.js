@@ -816,46 +816,103 @@ function formatDateForUI(dateObj) {
   // ============================================================
 
   // ============================================================
-  // VALIDAZIONE E FIX IMPORTI (Correzione Dic 2025)
+  // VALIDAZIONE E FIX IMPORTI (Enhanced Dic 2025)
   // ============================================================
   /**
    * Valida e corregge la coerenza tra imponibile, IVA e totale
+   * Con enhanced logging strutturato e rilevamento errori mapping
    * @param {Object} doc - Documento con campi imp, iva, tot
    * @param {string} source - "ADE" o "GEST" per logging
    * @param {string} docId - Identificativo documento per logging
-   * @returns {Object} - Documento con importi validati/corretti
+   * @returns {Object} - Documento con importi validati/corretti e metadata validazione
    */
   function fixAndValidateAmounts(doc, source, docId) {
     const { imp, iva, tot } = doc;
-    let fixed = { ...doc };
+    let fixed = { 
+      imp: imp || 0,
+      iva: iva || 0, 
+      tot: tot || 0 
+    };
     
-    // 1. Calcola il totale atteso
+    const validationLog = {
+      source,
+      docId,
+      status: 'VALID',
+      warnings: [],
+      errors: [],
+      actions: []
+    };
+    
+    // 1. Validazione valori negativi (se non sono note credito esplicite)
+    if (imp < 0 && iva >= 0) {
+      validationLog.warnings.push(`Imponibile negativo: ${imp}`);
+    }
+    if (iva < 0 && imp >= 0) {
+      validationLog.warnings.push(`IVA negativa: ${iva} (possibile nota credito)`);
+    }
+    
+    // 2. Calcola il totale atteso
     const expectedTot = +(imp + iva).toFixed(2);
     
-    // 2. Se il totale è mancante o zero, calcolalo
+    // 3. Se il totale è mancante o zero, calcolalo
     if (!tot || tot === 0) {
       if (imp > 0 || iva > 0) {
-        console.warn(`⚠️ ${source} [${docId}]: Totale mancante - calcolato da imp+iva: ${expectedTot}`);
+        validationLog.status = 'FIXED';
+        validationLog.warnings.push(`Totale mancante - calcolato da imp+iva: ${expectedTot}`);
+        validationLog.actions.push(`Totale impostato a ${expectedTot}`);
         fixed.tot = expectedTot;
+        console.warn(`⚠️ ${source} [${docId}]: Totale mancante - calcolato da imp+iva: ${expectedTot}`);
       }
     }
-    // 3. Se il totale esiste ma è inconsistente (diff > 0.5€)
+    // 4. Se il totale esiste ma è inconsistente (diff > 0.5€)
     else if (Math.abs(tot - expectedTot) > 0.50) {
-      console.warn(`⚠️ ${source} [${docId}]: INCONSISTENZA IMPORTI!`);
-      console.warn(`   Imponibile: ${imp}`);
-      console.warn(`   IVA: ${iva}`);
-      console.warn(`   Totale dichiarato: ${tot}`);
-      console.warn(`   Totale atteso (imp+iva): ${expectedTot}`);
-      console.warn(`   Differenza: ${(tot - expectedTot).toFixed(2)}€`);
+      validationLog.status = 'ERROR';
+      const diff = (tot - expectedTot).toFixed(2);
       
-      // Se l'imponibile è sospettosamente basso rispetto al totale
+      validationLog.errors.push(`INCONSISTENZA IMPORTI: differenza ${diff}€`);
+      validationLog.errors.push(`Imponibile: ${imp}, IVA: ${iva}, Totale dichiarato: ${tot}, Totale atteso: ${expectedTot}`);
+      
+      console.error(`❌ ${source} [${docId}]: INCONSISTENZA IMPORTI RILEVATA!`);
+      console.error(`   📊 Dettagli importi:`);
+      console.error(`      • Imponibile: ${imp.toFixed(2)} €`);
+      console.error(`      • IVA: ${iva.toFixed(2)} €`);
+      console.error(`      • Totale dichiarato: ${tot.toFixed(2)} €`);
+      console.error(`      • Totale atteso (imp+iva): ${expectedTot.toFixed(2)} €`);
+      console.error(`      • ⚠️ DIFFERENZA: ${diff} €`);
+      
+      // 5. Rilevamento errore mapping colonne (imponibile sospettosamente basso)
       if (imp <= 10 && tot > 100) {
-        console.error(`   🚨 PROBABILE ERRORE MAPPING: Imponibile troppo basso (${imp}) per totale ${tot}`);
+        validationLog.errors.push(`CRITICO: Imponibile troppo basso (${imp}) per totale ${tot} - PROBABILE ERRORE MAPPING COLONNE`);
+        console.error(`   🚨 DIAGNOSI: PROBABILE ERRORE MAPPING COLONNE!`);
+        console.error(`      • Imponibile troppo basso: ${imp} € (< 10 €)`);
+        console.error(`      • Ma totale è alto: ${tot} € (> 100 €)`);
+        console.error(`      • ⚡ AZIONE RICHIESTA: Verificare mapping colonna "Imponibile" nel file ${source}`);
+      }
+      
+      // 6. Rilevamento IVA zero con totale molto maggiore dell'imponibile
+      if (iva === 0 && tot > (imp * 1.15)) {
+        validationLog.errors.push(`Possibile errore: IVA=0 ma totale (${tot}) >> imponibile (${imp}) * 1.15`);
+        console.error(`   🚨 DIAGNOSI: IVA = 0 ma totale sospetto!`);
+        console.error(`      • Imponibile: ${imp} €`);
+        console.error(`      • IVA: 0 € (zero)`);
+        console.error(`      • Totale: ${tot} €`);
+        console.error(`      • ⚡ AZIONE RICHIESTA: Verificare mapping colonna "IVA/Imposta" nel file ${source}`);
       }
     }
-    // 4. Validazione positiva se tutto torna
+    // 7. Validazione positiva se tutto torna
     else {
-      // Tutto ok - differenza entro ±0.50€
+      const diff = Math.abs(tot - expectedTot);
+      if (diff <= 0.01) {
+        validationLog.status = 'VALID_EXACT';
+      } else {
+        validationLog.status = 'VALID_APPROX';
+        validationLog.warnings.push(`Arrotondamento minimo: differenza ${diff.toFixed(2)}€`);
+      }
+    }
+    
+    // Log strutturato per aggregazione statistiche
+    if (validationLog.errors.length > 0 || validationLog.warnings.length > 0) {
+      console.log(`📋 VALIDATION LOG [${source}] [${docId}]:`, JSON.stringify(validationLog, null, 2));
     }
     
     return fixed;
@@ -1768,6 +1825,131 @@ function formatDateForUI(dateObj) {
 
   // ---------- build records ----------
 
+  // ============================================================
+  // 🔒 ENHANCED COLUMN DETECTION WITH VALIDATION
+  // ============================================================
+  /**
+   * Validates and detects ADE Excel columns with strict criteria
+   * Returns an immutable frozen configuration object
+   * @param {Array} headers - Column headers from Excel file
+   * @param {Object} existingConfig - Previously saved configuration
+   * @returns {Object} Frozen configuration object
+   */
+  function detectAndValidateAdeColumns(headers, existingConfig = {}) {
+    const H = headers;
+    const h = headers.map(x => x.toLowerCase());
+    
+    // Official ADE column names (case-sensitive for exact match)
+    const OFFICIAL_COLUMNS = Object.freeze({
+      IMPONIBILE: "Imponibile/Importo (totale in euro)",
+      IMPOSTA: "Imposta (totale in euro)"
+    });
+    
+    const config = {};
+    const validationErrors = [];
+    const validationWarnings = [];
+    
+    // 1. Numero Fattura
+    config.num = existingConfig.num || findCol(H, h, "numero fattura / documento", "numero fattura", "numero documento");
+    if (!config.num) validationWarnings.push("Colonna Numero Fattura non trovata");
+    
+    // 2. Data
+    config.data = existingConfig.data || findCol(H, h, "data emissione", "data fattura", "data registrazione");
+    if (!config.data) validationWarnings.push("Colonna Data non trovata");
+    
+    // 3. P.IVA Fornitore
+    const colPivaFor = existingConfig.piva || findCol(H, h, "partita iva fornitore", "partita iva cedente", "partita iva cedente / prestatore");
+    const colPivaCli = findCol(H, h, "partita iva cliente");
+    config.piva = colPivaFor || colPivaCli;
+    if (!config.piva) validationWarnings.push("Colonna P.IVA non trovata");
+    
+    // 4. Denominazione
+    config.den = existingConfig.den || findCol(H, h, "denominazione fornitore", "denominazione cedente", "denominazione cedente / prestatore");
+    if (!config.den) validationWarnings.push("Colonna Denominazione non trovata");
+    
+    // 5. IMPONIBILE - Critical with strict validation
+    config.imp = existingConfig.imp;
+    if (!config.imp) {
+      // First try: exact match (case-sensitive)
+      const idxImpExact = H.indexOf(OFFICIAL_COLUMNS.IMPONIBILE);
+      if (idxImpExact !== -1) {
+        config.imp = H[idxImpExact];
+        console.log(`✅ ADE Imponibile trovato (exact match): colonna [${idxImpExact}] = "${config.imp}"`);
+      } else {
+        // Second try: case-insensitive fallback
+        const idxImpLower = h.indexOf(OFFICIAL_COLUMNS.IMPONIBILE.toLowerCase());
+        if (idxImpLower !== -1) {
+          config.imp = H[idxImpLower];
+          validationWarnings.push(`Imponibile trovato ma con case diverso: "${config.imp}"`);
+          console.log(`⚠️ ADE Imponibile trovato (lowercase): colonna [${idxImpLower}] = "${config.imp}"`);
+        } else {
+          validationErrors.push(`CRITICO: Colonna Imponibile non trovata! Nome atteso: "${OFFICIAL_COLUMNS.IMPONIBILE}"`);
+          console.error(`❌ COLONNA IMPONIBILE ADE NON TROVATA!`);
+          console.error(`   Nome ufficiale atteso: "${OFFICIAL_COLUMNS.IMPONIBILE}"`);
+          console.error(`   Colonne disponibili:`, H);
+        }
+      }
+    }
+    
+    // 6. IMPOSTA (IVA) - Critical with strict validation
+    config.iva = existingConfig.iva;
+    if (!config.iva) {
+      // First try: exact match (case-sensitive)
+      const idxIvaExact = H.indexOf(OFFICIAL_COLUMNS.IMPOSTA);
+      if (idxIvaExact !== -1) {
+        config.iva = H[idxIvaExact];
+        console.log(`✅ ADE Imposta trovata (exact match): colonna [${idxIvaExact}] = "${config.iva}"`);
+      } else {
+        // Second try: case-insensitive fallback
+        const idxIvaLower = h.indexOf(OFFICIAL_COLUMNS.IMPOSTA.toLowerCase());
+        if (idxIvaLower !== -1) {
+          config.iva = H[idxIvaLower];
+          validationWarnings.push(`Imposta trovata ma con case diverso: "${config.iva}"`);
+          console.log(`⚠️ ADE Imposta trovata (lowercase): colonna [${idxIvaLower}] = "${config.iva}"`);
+        } else {
+          validationErrors.push(`CRITICO: Colonna Imposta non trovata! Nome atteso: "${OFFICIAL_COLUMNS.IMPOSTA}"`);
+          console.error(`❌ COLONNA IVA ADE NON TROVATA!`);
+          console.error(`   Nome ufficiale atteso: "${OFFICIAL_COLUMNS.IMPOSTA}"`);
+          console.error(`   Colonne disponibili:`, H);
+        }
+      }
+    }
+    
+    // 7. Tipo Documento (optional)
+    config.tipo = findCol(H, h, "tipo documento");
+    
+    // Validation summary
+    console.log("📋 MAPPING COLONNE ADE - VALIDAZIONE COMPLETA:");
+    console.log(`   Numero Fattura: "${config.num || 'NON TROVATO'}"`);
+    console.log(`   Data: "${config.data || 'NON TROVATO'}"`);
+    console.log(`   P.IVA Fornitore: "${config.piva || 'NON TROVATO'}"`);
+    console.log(`   Denominazione: "${config.den || 'NON TROVATO'}"`);
+    console.log(`   ⭐ Imponibile: "${config.imp || 'NON TROVATO'}"`);
+    console.log(`   ⭐ Imposta: "${config.iva || 'NON TROVATO'}"`);
+    console.log(`   Tipo Documento: "${config.tipo || 'NON TROVATO'}"`);
+    
+    if (validationWarnings.length > 0) {
+      console.warn("⚠️ AVVISI VALIDAZIONE ADE:");
+      validationWarnings.forEach(w => console.warn(`   - ${w}`));
+    }
+    
+    if (validationErrors.length > 0) {
+      console.error("❌ ERRORI CRITICI VALIDAZIONE ADE:");
+      validationErrors.forEach(e => console.error(`   - ${e}`));
+    }
+    
+    // Return immutable configuration to prevent modifications
+    const frozenConfig = Object.freeze({
+      ...config,
+      _validated: true,
+      _timestamp: new Date().toISOString(),
+      _errors: Object.freeze([...validationErrors]),
+      _warnings: Object.freeze([...validationWarnings])
+    });
+    
+    return frozenConfig;
+  }
+
   function buildAdeRecords(parsed) {
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
@@ -1778,77 +1960,26 @@ function formatDateForUI(dateObj) {
   H.forEach((col, idx) => {
     console.log(`   [${idx}] "${col}"`);
   });
-  console.log("🔥🔥🔥 ===== FINE LISTA COLONNE ===== 🔥🔥🔥");
+  console.log("🔥🔥🔥 ===== FINE LISTA COLONNE ===== 🔥🔉🔥");
 
-  const cfg = getColumnConfig("ADE");
+  // 🔒 USE ENHANCED DETECTION WITH VALIDATION
+  const existingCfg = getColumnConfig("ADE");
+  const validatedConfig = detectAndValidateAdeColumns(H, existingCfg);
+  
+  // Extract columns from validated config
+  const colNum = validatedConfig.num;
+  const colData = validatedConfig.data;
+  const colPivaFor = validatedConfig.piva;
+  const colDenFor = validatedConfig.den;
+  const colImp = validatedConfig.imp;
+  const colIva = validatedConfig.iva;
+  const colTipo = validatedConfig.tipo;
 
-  const colNum   = cfg.num  || findCol(H, h, "numero fattura / documento", "numero fattura", "numero documento");
-  const colData  = cfg.data || findCol(H, h, "data emissione", "data fattura", "data registrazione");
-  const colPivaFor = cfg.piva || findCol(H, h, "partita iva fornitore", "partita iva cedente", "partita iva cedente / prestatore");
-  const colPivaCli = findCol(H, h, "partita iva cliente");
-  const colDenFor  = cfg.den || findCol(H, h, "denominazione fornitore", "denominazione cedente", "denominazione cedente / prestatore");
-  
-  // ============================================================
-  // 🔧 FIX MAPPING IMPORTI ADE - indexOf() con nomi esatti
-  // ============================================================
-  // Usa indexOf() con i nomi ESATTI delle colonne ADE ufficiali
-  // per evitare match errati con colonne simili (es. "Aliquota IVA")
-  // ============================================================
-  
-  let colImp = cfg.imp;
-  if (!colImp) {
-    // Cerca ESATTAMENTE "Imponibile/Importo (totale in euro)" - nome ufficiale ADE
-    const idxImpAde = H.indexOf("Imponibile/Importo (totale in euro)");
-    if (idxImpAde !== -1) {
-      colImp = H[idxImpAde];
-      console.log(`✅ ADE Imponibile trovato con indexOf(): colonna [${idxImpAde}] = "${colImp}"`);
-    } else {
-      // Fallback: cerca case-insensitive
-      const idxFallback = h.indexOf("imponibile/importo (totale in euro)");
-      if (idxFallback !== -1) {
-        colImp = H[idxFallback];
-        console.log(`⚠️ ADE Imponibile trovato (lowercase): colonna [${idxFallback}] = "${colImp}"`);
-      } else {
-        console.error(`❌ COLONNA IMPONIBILE ADE NON TROVATA! Header disponibili:`, H);
-      }
-    }
-  }
-  
-  let colIva = cfg.iva;
-  if (!colIva) {
-    // Cerca ESATTAMENTE "Imposta (totale in euro)" - nome ufficiale ADE
-    const idxIvaAde = H.indexOf("Imposta (totale in euro)");
-    if (idxIvaAde !== -1) {
-      colIva = H[idxIvaAde];
-      console.log(`✅ ADE IVA trovata con indexOf(): colonna [${idxIvaAde}] = "${colIva}"`);
-    } else {
-      // Fallback: cerca case-insensitive
-      const idxFallback = h.indexOf("imposta (totale in euro)");
-      if (idxFallback !== -1) {
-        colIva = H[idxFallback];
-        console.log(`⚠️ ADE IVA trovata (lowercase): colonna [${idxFallback}] = "${colIva}"`);
-      } else {
-        console.error(`❌ COLONNA IVA ADE NON TROVATA! Header disponibili:`, H);
-      }
-    }
-  }
-  
-  const colTipo  = findCol(H, h, "tipo documento");
-
-  // 🔍 DEBUG: Log mapping colonne per diagnostica
-  console.log("📋 MAPPING FINALE COLONNE ADE:");
-  console.log(`   Numero Fattura: "${colNum}"`);
-  console.log(`   Data: "${colData}"`);
-  console.log(`   P.IVA Fornitore: "${colPivaFor}"`);
-  console.log(`   Denominazione: "${colDenFor}"`);
-  console.log(`   ⭐ Imponibile: "${colImp}"`);
-  console.log(`   ⭐ IVA: "${colIva}"`);
-  console.log(`   Tipo Documento: "${colTipo}"`);
-
+  // Update persistent configuration (excluding internal validation metadata)
   updateColumnConfig("ADE", {
     num: colNum,
     data: colData,
-    piva: colPivaFor || colPivaCli,
+    piva: colPivaFor,
     den: colDenFor,
     imp: colImp,
     iva: colIva
@@ -1948,8 +2079,10 @@ function formatDateForUI(dateObj) {
       console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
     }
     
-    // ✅ VALIDAZIONE IMPORTI
+    // ✅ VALIDAZIONE IMPORTI CON ENHANCED CHECKS
     const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
+    imp = validated.imp;
+    iva = validated.iva;
     tot = validated.tot;
     
     // 🔍 DEBUG FINALE: Valori nel record
@@ -1960,7 +2093,8 @@ function formatDateForUI(dateObj) {
     
     const tipoDoc = (r[colTipo] || "").toUpperCase();
 
-    recs.push({
+    // 🔒 CREATE IMMUTABLE RECORD WITH VALIDATION CHECKSUM
+    const record = {
       src: "ADE",
       num,
       numDigits: normalizeInvoiceNumber(num, false),
@@ -1976,12 +2110,91 @@ function formatDateForUI(dateObj) {
       iva,
       tot,
       tipoDoc,
-      isForeign: isForeignPiva(piva)
+      isForeign: isForeignPiva(piva),
+      // 🔒 Immutability metadata
+      _parsed: true,
+      _parseTimestamp: new Date().toISOString(),
+      // Validation checksum to detect tampering
+      _checksum: calculateRecordChecksum(imp, iva, tot, num)
+    };
+    
+    // Freeze critical financial fields to prevent mutation
+    Object.defineProperty(record, 'imp', {
+      value: imp,
+      writable: false,
+      configurable: false
     });
+    Object.defineProperty(record, 'iva', {
+      value: iva,
+      writable: false,
+      configurable: false
+    });
+    Object.defineProperty(record, 'tot', {
+      value: tot,
+      writable: false,
+      configurable: false
+    });
+    
+    recs.push(record);
   }
 
+  console.log(`✅ ADE: Parsed ${recs.length} records con protezione immutabilità`);
   return recs;
 }
+
+  // ============================================================
+  // 🔒 IMMUTABILITY & VALIDATION UTILITIES
+  // ============================================================
+  
+  /**
+   * Calculate checksum for record validation
+   * @param {number} imp - Imponibile
+   * @param {number} iva - Imposta
+   * @param {number} tot - Totale
+   * @param {string} num - Numero documento
+   * @returns {string} Checksum hash
+   */
+  function calculateRecordChecksum(imp, iva, tot, num) {
+    const str = `${imp}|${iva}|${tot}|${num}`;
+    // Simple hash function for validation
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(16);
+  }
+  
+  /**
+   * Validate record integrity
+   * @param {Object} record - Record to validate
+   * @returns {Object} { valid: boolean, errors: Array }
+   */
+  function validateRecordIntegrity(record) {
+    const errors = [];
+    
+    if (!record._parsed) {
+      errors.push("Record non processato correttamente");
+    }
+    
+    // Verify checksum
+    const currentChecksum = calculateRecordChecksum(record.imp, record.iva, record.tot, record.num);
+    if (record._checksum && record._checksum !== currentChecksum) {
+      errors.push(`ALERT: Checksum non corrisponde! Record potrebbe essere stato modificato.`);
+    }
+    
+    // Verify amounts consistency
+    const expectedTot = +(record.imp + record.iva).toFixed(2);
+    if (Math.abs(record.tot - expectedTot) > 0.50) {
+      errors.push(`Incoerenza importi: tot=${record.tot} ma imp+iva=${expectedTot}`);
+    }
+    
+    return {
+      valid: errors.length === 0,
+      errors: Object.freeze(errors)
+    };
+  }
 
    // ---------- GESTIONALE FATTURE ACQUISTO (FILE B) ----------
 function buildGestAcqRecords(parsed) {
