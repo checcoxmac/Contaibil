@@ -1805,6 +1805,7 @@ function formatDateForUI(dateObj) {
     console.error(msg, H);
     throw new Error(msg);
   }
+  // Denominazione/P.IVA possono usare config se presente, ma gli importi NO
   const colPivaFor = cfg.piva || findCol(H, h, "partita iva fornitore", "partita iva cedente", "partita iva cedente / prestatore");
   const colPivaCli = findCol(H, h, "partita iva cliente");
   const colDenFor  = cfg.den || findCol(H, h, "denominazione fornitore", "denominazione cedente", "denominazione cedente / prestatore");
@@ -1817,46 +1818,60 @@ function formatDateForUI(dateObj) {
   // (così non rischiamo più di leggere colonne tipo "Aliquota IVA")
   // ============================================================
 
-  // ✅ Forziamo SEMPRE il mapping sugli header ufficiali ADE per Imponibile e Imposta
-  //    ignorando eventuali config salvate e normalizzando BOM/NBSP/spazi.
-  let colImp = null;
-  {
-    const targetImp = normalizeAdeHeader("Imponibile/Importo (totale in euro)");
-    const idxImpAde = normH.indexOf(targetImp);
-    if (idxImpAde !== -1) {
-      colImp = H[idxImpAde];
-      console.log(`✅ ADE Imponibile trovato con header normalizzato: colonna [${idxImpAde}] = "${colImp}"`);
-    } else {
-      const idxFallback = normH.findIndex(nh => nh.includes("imponibile/importo"));
-      if (idxFallback !== -1) {
-        colImp = H[idxFallback];
-        console.log(`⚠️ ADE Imponibile trovato (fallback includes): colonna [${idxFallback}] = "${colImp}"`);
-      }
-    }
-  }
+  // ✅ MAPPING IMPORTI ADE: IGNORA config salvate, usa SOLO header ufficiali
+  const findAdeCol = (targetLabel) => {
+    const target = normalizeAdeHeader(targetLabel);
 
-  let colIva = null;
-  {
-    const targetIva = normalizeAdeHeader("Imposta (totale in euro)");
-    const idxIvaAde = normH.indexOf(targetIva);
-    if (idxIvaAde !== -1) {
-      colIva = H[idxIvaAde];
-      console.log(`✅ ADE IVA trovata con header normalizzato: colonna [${idxIvaAde}] = "${colIva}"`);
-    } else {
-      const idxFallback = normH.findIndex(nh => nh.includes("imposta (totale"));
-      if (idxFallback !== -1) {
-        colIva = H[idxFallback];
-        console.log(`⚠️ ADE IVA trovata (fallback includes): colonna [${idxFallback}] = "${colIva}"`);
-      }
-    }
-  }
+    // 1) match esatto normalizzato
+    let idx = normH.indexOf(target);
+    if (idx !== -1) return idx;
 
-  if (!colImp || !colIva) {
+    // 2) match parziale
+    idx = normH.findIndex(nh => nh.includes(target));
+    return idx;
+  };
+
+  const idxImpAde = findAdeCol("Imponibile/Importo (totale in euro)");
+  const idxIvaAde = findAdeCol("Imposta (totale in euro)");
+
+  if (idxImpAde === -1 || idxIvaAde === -1) {
     const missing = [];
-    if (!colImp) missing.push("Imponibile/Importo (totale in euro)");
-    if (!colIva) missing.push("Imposta (totale in euro)");
+    if (idxImpAde === -1) missing.push("Imponibile/Importo (totale in euro)");
+    if (idxIvaAde === -1) missing.push("Imposta (totale in euro)");
     const msg = `❌ Colonne ADE mancanti: ${missing.join(", ")}. Verifica l'export ADE.`;
     console.error(msg, H);
+    throw new Error(msg);
+  }
+
+  const colImp = H[idxImpAde];
+  const colIva = H[idxIvaAde];
+
+  // Sanity check per evitare colonne di aliquota
+  const looksLikeAliquota = (idx) => {
+    const sample = [];
+    for (let i = 0; i < parsed.rows.length && sample.length < 50; i++) {
+      const val = parsed.rows[i][H[idx]];
+      if (val === undefined || val === null || val === "") continue;
+      const n = parseNumberIT(val);
+      if (!isNaN(n)) sample.push(n);
+    }
+    if (!sample.length) return false;
+
+    const distinct = Array.from(new Set(sample.map(x => +x.toFixed(2))));
+    const allSmall = sample.every(x => x > 0 && x <= 30);
+    const commonAliq = new Set([0,4,5,10,18,20,21,22,5.5,4.5,15,16,6,7,8,9]);
+    const mostlyAliq = sample.filter(x => commonAliq.has(+x.toFixed(1)) || commonAliq.has(+x.toFixed(0))).length >= Math.max(10, sample.length * 0.7);
+    return allSmall && mostlyAliq && distinct.length <= 12;
+  };
+
+  if (looksLikeAliquota(idxImpAde)) {
+    const msg = "❌ ADE: la colonna selezionata per Imponibile sembra un'ALIQUOTA IVA (valori tutti piccoli).";
+    console.error(msg, { col: colImp });
+    throw new Error(msg);
+  }
+  if (looksLikeAliquota(idxIvaAde)) {
+    const msg = "❌ ADE: la colonna selezionata per IVA sembra un'ALIQUOTA IVA (valori tutti piccoli).";
+    console.error(msg, { col: colIva });
     throw new Error(msg);
   }
   
