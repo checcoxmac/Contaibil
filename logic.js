@@ -750,63 +750,38 @@ function formatDateForUI(dateObj) {
 
   function parseNumberIT(val) {
       if (val == null) return 0.0;
-      
-      // 1. Converti in stringa e rimuovi caratteri comuni
+
       let s = String(val)
-        .replace(/['"]/g, '')      // apici
-        .replace(/€/g, '')         // simbolo euro
-        .replace(/EUR/gi, '')      // EUR scritto
-        .replace(/\s+/g, '')       // spazi
-        .trim();
-      
+          .replace(/['"]/g, '')
+          .replace(/€/g, '')
+          .replace(/EUR/gi, '')
+          .replace(/\s+/g, '')
+          .trim();
+
       if (s === "" || s === "-") return 0.0;
 
-      // 2. Trova posizioni di punto e virgola
-      const idxPunto = s.lastIndexOf('.');
-      const idxVirgola = s.lastIndexOf(',');
-
-      // 3. Caso: SOLO CIFRE (nessun separatore)
-      if (idxPunto === -1 && idxVirgola === -1) {
-          const num = parseFloat(s);
-          return isNaN(num) ? 0.0 : num;
+      // CASO ADE: numero con solo punto decimale e nessuna virgola → formato americano
+      // Es: 195.14  /  24838.49  /  887.00
+      if (/^\d+\.\d{2}$/.test(s)) {
+          return parseFloat(s);
       }
 
-      // 4. Caso: SOLO PUNTO (formato americano/ADE)
-      if (idxPunto !== -1 && idxVirgola === -1) {
-          // Es: "2191.84" → 2191.84
-          const num = parseFloat(s);
-          return isNaN(num) ? 0.0 : num;
+      // CASO ITALIANO (Gestionale): "4.717,00" → rimuovi punti e cambia virgola
+      if (s.includes(",") && s.includes(".")) {
+          return parseFloat(s.replace(/\./g, "").replace(",", "."));
       }
 
-      // 5. Caso: SOLO VIRGOLA (formato italiano)
-      if (idxVirgola !== -1 && idxPunto === -1) {
-          // Es: "24838,49" → 24838.49
-          s = s.replace(',', '.');
-          const num = parseFloat(s);
-          return isNaN(num) ? 0.0 : num;
+      // SOLO VIRGOLA → decimali italiani
+      if (s.includes(",")) {
+          return parseFloat(s.replace(",", "."));
       }
 
-      // 6. Caso: ENTRAMBI presenti - determina il formato dalla posizione
-      if (idxPunto !== -1 && idxVirgola !== -1) {
-          
-          if (idxVirgola < idxPunto) {
-              // FORMATO AMERICANO: virgola prima del punto
-              // Es: "1,298.17" → virgola=migliaia, punto=decimale
-              s = s.replace(/,/g, ''); // rimuovi virgole
-              const num = parseFloat(s);
-              return isNaN(num) ? 0.0 : num;
-              
-          } else {
-              // FORMATO ITALIANO: punto prima della virgola
-              // Es: "4.717,00" → punto=migliaia, virgola=decimale
-              s = s.replace(/\./g, '');  // rimuovi punti
-              s = s.replace(',', '.');   // virgola diventa punto
-              const num = parseFloat(s);
-              return isNaN(num) ? 0.0 : num;
-          }
+      // SOLO CIFRE → intero
+      if (/^\d+$/.test(s)) {
+          return parseFloat(s);
       }
 
-      // Fallback
+      // fallback
       const num = parseFloat(s);
       return isNaN(num) ? 0.0 : num;
   }
@@ -1769,8 +1744,16 @@ function formatDateForUI(dateObj) {
   // ---------- build records ----------
 
   function buildAdeRecords(parsed) {
-  const H = parsed.headers;
-  const h = H.map(x => x.toLowerCase());
+    const normalizeAdeHeader = (name) =>
+      String(name || "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const H = parsed.headers;
+    const h = H.map(x => x.toLowerCase());
+    const normH = H.map(normalizeAdeHeader);
 
   // 🔍 DEBUG: Stampa TUTTE le colonne del file ADE
   console.log("🔥🔥🔥 ===== INIZIO DEBUG FILE ADE ===== 🔥🔥🔥");
@@ -1791,42 +1774,46 @@ function formatDateForUI(dateObj) {
   // ============================================================
   // 🔧 FIX MAPPING IMPORTI ADE - indexOf() con nomi esatti
   // ============================================================
-  // Usa indexOf() con i nomi ESATTI delle colonne ADE ufficiali
-  // per evitare match errati con colonne simili (es. "Aliquota IVA")
+  // Usa SEMPRE i nomi ESATTI delle colonne ADE ufficiali
+  // e IGNORA le vecchie config salvate per IMP e IVA
+  // (così non rischiamo più di leggere colonne tipo "Aliquota IVA")
   // ============================================================
-  
-  let colImp = cfg.imp;
-  if (!colImp) {
-    // Cerca ESATTAMENTE "Imponibile/Importo (totale in euro)" - nome ufficiale ADE
-    const idxImpAde = H.indexOf("Imponibile/Importo (totale in euro)");
+
+  // ✅ Forziamo SEMPRE il mapping sugli header ufficiali ADE per l'imponibile,
+  //    ignorando eventuali config salvate (evita errori tipo "Aliquota IVA").
+  //    Normalizziamo gli header (trim, spazi multipli, NBSP) per evitare mismatch.
+  let colImp = null;
+  {
+    const targetImp = normalizeAdeHeader("Imponibile/Importo (totale in euro)");
+    const idxImpAde = normH.indexOf(targetImp);
     if (idxImpAde !== -1) {
       colImp = H[idxImpAde];
-      console.log(`✅ ADE Imponibile trovato con indexOf(): colonna [${idxImpAde}] = "${colImp}"`);
+      console.log(`✅ ADE Imponibile trovato con header normalizzato: colonna [${idxImpAde}] = "${colImp}"`);
     } else {
-      // Fallback: cerca case-insensitive
-      const idxFallback = h.indexOf("imponibile/importo (totale in euro)");
+      // Fallback: cerca case-insensitive con includes sugli header normalizzati
+      const idxFallback = normH.findIndex(nh => nh.includes("imponibile/importo"));
       if (idxFallback !== -1) {
         colImp = H[idxFallback];
-        console.log(`⚠️ ADE Imponibile trovato (lowercase): colonna [${idxFallback}] = "${colImp}"`);
+        console.log(`⚠️ ADE Imponibile trovato (fallback includes): colonna [${idxFallback}] = "${colImp}"`);
       } else {
         console.error(`❌ COLONNA IMPONIBILE ADE NON TROVATA! Header disponibili:`, H);
       }
     }
   }
-  
-  let colIva = cfg.iva;
-  if (!colIva) {
-    // Cerca ESATTAMENTE "Imposta (totale in euro)" - nome ufficiale ADE
-    const idxIvaAde = H.indexOf("Imposta (totale in euro)");
+
+  // ✅ Stessa logica per l'IVA: usiamo sempre la colonna ufficiale ADE
+  let colIva = null;
+  {
+    const targetIva = normalizeAdeHeader("Imposta (totale in euro)");
+    const idxIvaAde = normH.indexOf(targetIva);
     if (idxIvaAde !== -1) {
       colIva = H[idxIvaAde];
-      console.log(`✅ ADE IVA trovata con indexOf(): colonna [${idxIvaAde}] = "${colIva}"`);
+      console.log(`✅ ADE IVA trovata con header normalizzato: colonna [${idxIvaAde}] = "${colIva}"`);
     } else {
-      // Fallback: cerca case-insensitive
-      const idxFallback = h.indexOf("imposta (totale in euro)");
+      const idxFallback = normH.findIndex(nh => nh.includes("imposta (totale"));
       if (idxFallback !== -1) {
         colIva = H[idxFallback];
-        console.log(`⚠️ ADE IVA trovata (lowercase): colonna [${idxFallback}] = "${colIva}"`);
+        console.log(`⚠️ ADE IVA trovata (fallback includes): colonna [${idxFallback}] = "${colIva}"`);
       } else {
         console.error(`❌ COLONNA IVA ADE NON TROVATA! Header disponibili:`, H);
       }
@@ -1859,6 +1846,9 @@ function formatDateForUI(dateObj) {
     const num  = r[colNum]    || "";
     const den  = r[colDenFor] || "";
     const piva = r[colPivaFor] || r[colPivaCli] || "";
+
+    // Tipo documento ADE normalizzato (serve per gestione segno NC)
+    const tipoDocRaw = (colTipo ? (r[colTipo] || "") : "").toString().toUpperCase();
 
     // 🔍 DEBUG FATTURA SPECIFICA - TRACCIA TUTTO IL PROCESSO
     if (num === "2528012466" || String(num).includes("2528012466")) {
@@ -1939,8 +1929,23 @@ function formatDateForUI(dateObj) {
     }
     
     // ORA fai il parsing con il valore corretto
-    let imp = parseNumberIT(impRaw);
-    let iva = cleanIVAValue(ivaRaw, piva);
+    const impParsed = parseNumberIT(impRaw);
+    const ivaParsed = cleanIVAValue(ivaRaw, piva);
+
+    // ➕/➖ Gestione segno: Note di credito negative, fatture positive
+    let imp = impParsed;
+    let iva = ivaParsed;
+
+    if (tipoDocRaw.includes("NOTA") || tipoDocRaw.includes("NC")) {
+      // Nota di credito: imponibile e IVA devono essere negativi
+      imp = -Math.abs(impParsed);
+      iva = -Math.abs(ivaParsed);
+    } else {
+      // Fatture normali: imponibile e IVA sempre positivi
+      imp = Math.abs(impParsed);
+      iva = Math.abs(ivaParsed);
+    }
+
     let tot = +(imp + iva).toFixed(2);
     
     // 🔍 DEBUG: Valori dopo parsing
@@ -1958,7 +1963,7 @@ function formatDateForUI(dateObj) {
       console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
-    const tipoDoc = (r[colTipo] || "").toUpperCase();
+    const tipoDoc = tipoDocRaw;
 
     recs.push({
       src: "ADE",
@@ -5594,19 +5599,28 @@ function renderPeriodKpi(results) {
       return;
     }
 
-    // Raggruppa per mese (YYYY-MM)
+    // Raggruppa per mese (YYYY-MM) — includi ANCHE righe senza data per preservare i totali ADE
     const groups = {};
     let grandImp = 0;
     let grandIva = 0;
     let grandTot = 0;
 
     lastAdeRecords.forEach(r => {
-      // Usa dataStr o data oggetto
-      if (!r.data) return; 
-      const key = monthKeyFromDate(r.data); // Funzione già esistente nel tuo codice
-      
+      // ✅ Usa la data se presente, altrimenti crea un bucket "SENZA_DATA" per non perdere righe
+      let key = null;
+      if (r.data) {
+        key = monthKeyFromDate(r.data);
+      } else if (r.dataIso && r.dataIso.length >= 7) {
+        // es. "2024-03-15" -> "2024-03"
+        key = r.dataIso.slice(0, 7);
+      } else {
+        key = "SENZA_DATA";
+      }
+
+      const label = key === "SENZA_DATA" ? "(Senza data)" : monthLabelFromKey(key);
+
       if (!groups[key]) {
-        groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, dateObj: r.data };
+        groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, dateObj: r.data, label };
       }
       
       const imp = r.imp || 0;
@@ -5624,7 +5638,11 @@ function renderPeriodKpi(results) {
     });
 
     // Ordina chiavi
-    const keys = Object.keys(groups).sort();
+    const keys = Object.keys(groups).sort((a, b) => {
+      if (a === "SENZA_DATA") return 1;
+      if (b === "SENZA_DATA") return -1;
+      return a.localeCompare(b);
+    });
 
     keys.forEach(key => {
       const g = groups[key];
@@ -5632,7 +5650,7 @@ function renderPeriodKpi(results) {
 
       // Cella Mese
       const tdMese = document.createElement("td");
-      tdMese.textContent = monthLabelFromKey(key); // Funzione già esistente
+      tdMese.textContent = g.label;
       tr.appendChild(tdMese);
 
       // Cella Conteggio
@@ -5687,21 +5705,34 @@ function renderPeriodKpi(results) {
       // Rigeneriamo i dati per l'export (simile al render)
       const groups = {};
       lastAdeRecords.forEach(r => {
-        if (!r.data) return; 
-        const key = monthKeyFromDate(r.data);
-        if (!groups[key]) groups[key] = { count: 0, imp: 0, iva: 0, tot: 0 };
+        let key = null;
+        if (r.data) {
+          key = monthKeyFromDate(r.data);
+        } else if (r.dataIso && r.dataIso.length >= 7) {
+          key = r.dataIso.slice(0, 7);
+        } else {
+          key = "SENZA_DATA";
+        }
+
+        const label = key === "SENZA_DATA" ? "(Senza data)" : monthLabelFromKey(key);
+
+        if (!groups[key]) groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, label };
         groups[key].count++;
         groups[key].imp += (r.imp || 0);
         groups[key].iva += (r.iva || 0);
         groups[key].tot += (r.tot || 0);
       });
 
-      const keys = Object.keys(groups).sort();
+      const keys = Object.keys(groups).sort((a, b) => {
+        if (a === "SENZA_DATA") return 1;
+        if (b === "SENZA_DATA") return -1;
+        return a.localeCompare(b);
+      });
       const rows = ["Periodo;Numero Fatture;Imponibile;IVA;Totale"];
       
       keys.forEach(k => {
         const g = groups[k];
-        const label = monthLabelFromKey(k);
+        const label = g.label;
         const line = [
           `"${label}"`,
           g.count,
