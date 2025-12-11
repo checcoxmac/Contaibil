@@ -1561,6 +1561,7 @@ tr.match-source-row td {
   }
   
   .edit-actions {
+    padding: 12px;
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
