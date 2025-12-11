@@ -1969,27 +1969,76 @@ function formatDateForUI(dateObj) {
   });
   console.log("🔥🔥🔥 ===== FINE LISTA COLONNE ===== 🔥🔉🔥");
 
-  // 🔒 USE ENHANCED DETECTION WITH VALIDATION
-  const existingCfg = getColumnConfig("ADE");
-  const validatedConfig = detectAndValidateAdeColumns(H, existingCfg);
+  // Get base config for non-critical columns
+  const cfg = getColumnConfig("ADE");
   
-  // Extract columns from validated config
-  const colNum = validatedConfig.num;
-  const colData = validatedConfig.data;
-  const colPivaFor = validatedConfig.piva;
-  const colDenFor = validatedConfig.den;
-  const colImp = validatedConfig.imp;
-  const colIva = validatedConfig.iva;
-  const colTipo = validatedConfig.tipo;
+  const colNum = cfg.num || findCol(H, h, "numero fattura / documento", "numero fattura", "numero documento");
+  const colData = cfg.data || findCol(H, h, "data emissione", "data fattura", "data registrazione");
+  const colPivaFor = cfg.piva || findCol(H, h, "partita iva fornitore", "partita iva cedente", "partita iva cedente / prestatore");
+  const colPivaCli = findCol(H, h, "partita iva cliente");
+  const colDenFor = cfg.den || findCol(H, h, "denominazione fornitore", "denominazione cedente", "denominazione cedente / prestatore");
+  const colTipo = findCol(H, h, "tipo documento");
 
-  // Update persistent configuration (excluding internal validation metadata)
+  // ============================================================
+  // 🔧 FIX MAPPING IMPORTI ADE - usa SEMPRE i nomi ufficiali
+  //    (ignora cfg.imp / cfg.iva che possono essere sporche)
+  // ============================================================
+
+  // IMPONIBILE ADE
+  let colImp = null;
+  {
+    // Nome ufficiale ADE
+    const idxImpAde = H.indexOf("Imponibile/Importo (totale in euro)");
+
+    if (idxImpAde !== -1) {
+      colImp = H[idxImpAde];
+      console.log(`✅ ADE Imponibile forzato su colonna ufficiale [${idxImpAde}] = "${colImp}"`);
+    } else {
+      // Tentativo backup (lowercase)
+      const idxFallback = H.map(h => h.toLowerCase())
+                           .indexOf("imponibile/importo (totale in euro)");
+      if (idxFallback !== -1) {
+        colImp = H[idxFallback];
+        console.log(`⚠️ ADE Imponibile trovato (fallback lowercase) = "${colImp}"`);
+      } else {
+        console.error("❌ COLONNA IMPONIBILE ADE NON TROVATA! Header disponibili:", H);
+      }
+    }
+  }
+
+  // IVA ADE
+  let colIva = null;
+  {
+    const idxIvaAde = H.indexOf("Imposta (totale in euro)");
+
+    if (idxIvaAde !== -1) {
+      colIva = H[idxIvaAde];
+      console.log(`✅ ADE IVA forzata su colonna ufficiale [${idxIvaAde}] = "${colIva}"`);
+    } else {
+      const idxFallback = H.map(h => h.toLowerCase())
+                           .indexOf("imposta (totale in euro)");
+      if (idxFallback !== -1) {
+        colIva = H[idxFallback];
+        console.log(`⚠️ ADE IVA trovata (fallback lowercase) = "${colIva}"`);
+      } else {
+        console.error("❌ COLONNA IVA ADE NON TROVATA! Header disponibili:", H);
+      }
+    }
+  }
+
+  // Salvo la config corretta (sovrascrive quella vecchia e sbagliata)
   updateColumnConfig("ADE", {
     num: colNum,
     data: colData,
-    piva: colPivaFor,
+    piva: colPivaFor || colPivaCli,
     den: colDenFor,
     imp: colImp,
     iva: colIva
+  });
+
+  console.log("🔎 Mapping colonne ADE (forzato):", {
+    colImp,
+    colIva
   });
 
   const recs = [];
