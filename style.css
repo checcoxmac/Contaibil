@@ -1537,6 +1537,7 @@ tr.match-source-row td {
   }
   
   /* Edit panel - full screen on mobile */
+  #editPanel,
   .edit-panel {
     width: 100%;
     max-width: 100%;
@@ -1544,7 +1545,7 @@ tr.match-source-row td {
   }
   
   .edit-header {
-    padding: 12px;
+    padding: 10px 12px;
   }
   
   #editPanelContent {
@@ -1560,12 +1561,14 @@ tr.match-source-row td {
   }
   
   .edit-actions {
-    padding: 12px;
     flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
   }
   
   .edit-actions .btn {
     width: 100%;
+    justify-content: center;
   }
   
   /* Analysis section */

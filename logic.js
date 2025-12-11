@@ -1948,6 +1948,19 @@ function formatDateForUI(dateObj) {
       console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
     }
     
+    // 🔧 FIX: Check for inverted imponibile/imposta values
+    // If IVA is more than 60% of imponibile, they're likely swapped
+    if (imp > 0 && iva > 0) {
+      const ratio = iva / imp;
+      if (ratio > 0.6) {
+        console.warn(
+          `Imponibile/IVA mismatch detected (imp=${imp}, iva=${iva}). Swapping values.`
+        );
+        [imp, iva] = [iva, imp];
+        tot = +(imp + iva).toFixed(2);
+      }
+    }
+    
     // ✅ VALIDAZIONE IMPORTI
     const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
     tot = validated.tot;
