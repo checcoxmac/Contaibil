@@ -1872,20 +1872,22 @@ function formatDateForUI(dateObj) {
     if (!config.den) validationWarnings.push("Colonna Denominazione non trovata");
     
     // 5. IMPONIBILE - Critical with strict validation
-    config.imp = existingConfig.imp;
-    if (!config.imp) {
+    // ⚠️ SEMPRE FORZA LE COLONNE UFFICIALI ADE - IGNORA CONFIG SALVATE
+    // Questo previene errori da config vecchie/sbagliate che puntano a colonne errate
+    config.imp = null; // Ignora existingConfig.imp
+    {
       // First try: exact match (case-sensitive)
       const idxImpExact = H.indexOf(OFFICIAL_COLUMNS.IMPONIBILE);
       if (idxImpExact !== -1) {
         config.imp = H[idxImpExact];
-        console.log(`✅ ADE Imponibile trovato (exact match): colonna [${idxImpExact}] = "${config.imp}"`);
+        console.log(`✅ ADE Imponibile (FORZATO da colonna ufficiale): colonna [${idxImpExact}] = "${config.imp}"`);
       } else {
         // Second try: case-insensitive fallback
         const idxImpLower = h.indexOf(OFFICIAL_COLUMNS.IMPONIBILE.toLowerCase());
         if (idxImpLower !== -1) {
           config.imp = H[idxImpLower];
           validationWarnings.push(`Imponibile trovato ma con case diverso: "${config.imp}"`);
-          console.log(`⚠️ ADE Imponibile trovato (lowercase): colonna [${idxImpLower}] = "${config.imp}"`);
+          console.log(`⚠️ ADE Imponibile (FORZATO, lowercase): colonna [${idxImpLower}] = "${config.imp}"`);
         } else {
           validationErrors.push(`CRITICO: Colonna Imponibile non trovata! Nome atteso: "${OFFICIAL_COLUMNS.IMPONIBILE}"`);
           console.error(`❌ COLONNA IMPONIBILE ADE NON TROVATA!`);
@@ -1896,20 +1898,21 @@ function formatDateForUI(dateObj) {
     }
     
     // 6. IMPOSTA (IVA) - Critical with strict validation
-    config.iva = existingConfig.iva;
-    if (!config.iva) {
+    // ⚠️ SEMPRE FORZA LE COLONNE UFFICIALI ADE - IGNORA CONFIG SALVATE
+    config.iva = null; // Ignora existingConfig.iva
+    {
       // First try: exact match (case-sensitive)
       const idxIvaExact = H.indexOf(OFFICIAL_COLUMNS.IMPOSTA);
       if (idxIvaExact !== -1) {
         config.iva = H[idxIvaExact];
-        console.log(`✅ ADE Imposta trovata (exact match): colonna [${idxIvaExact}] = "${config.iva}"`);
+        console.log(`✅ ADE Imposta (FORZATA da colonna ufficiale): colonna [${idxIvaExact}] = "${config.iva}"`);
       } else {
         // Second try: case-insensitive fallback
         const idxIvaLower = h.indexOf(OFFICIAL_COLUMNS.IMPOSTA.toLowerCase());
         if (idxIvaLower !== -1) {
           config.iva = H[idxIvaLower];
           validationWarnings.push(`Imposta trovata ma con case diverso: "${config.iva}"`);
-          console.log(`⚠️ ADE Imposta trovata (lowercase): colonna [${idxIvaLower}] = "${config.iva}"`);
+          console.log(`⚠️ ADE Imposta (FORZATA, lowercase): colonna [${idxIvaLower}] = "${config.iva}"`);
         } else {
           validationErrors.push(`CRITICO: Colonna Imposta non trovata! Nome atteso: "${OFFICIAL_COLUMNS.IMPOSTA}"`);
           console.error(`❌ COLONNA IVA ADE NON TROVATA!`);
@@ -2016,7 +2019,7 @@ function formatDateForUI(dateObj) {
     let impRaw = r[colImp] || "";
     let ivaRaw = r[colIva] || "";
     
-    // 🔧 AUTO-FIX PRE-PARSING (versione prudente)
+    // 🔧 AUTO-FIX PRE-PARSING (versione PRUDENTE - evita Aliquota IVA)
     if (
       colImp && colData &&
       colImp === colData &&
@@ -2037,12 +2040,20 @@ function formatDateForUI(dateObj) {
         if (String(val).length === 11 && !isNaN(val)) continue;
 
         const lowerName = colName.toLowerCase();
+        
+        // Escludo colonne sicuramente NON imponibili
         if (lowerName.includes("data")) continue;
-        if (lowerName.includes("partita")) continue;
+        if (lowerName.includes("partita")) continue;     // P.IVA
         if (lowerName.includes("codice")) continue;
+        if (lowerName.includes("aliquota")) continue;    // es. Aliquota IVA (5, 8, 18, 22%)
+        if (lowerName.includes("%")) continue;           // Percentuali
+        if (lowerName.includes("perc")) continue;        // Percentuali varianti
 
         const numVal = parseNumberIT(val);
-        if (numVal >= 1 && numVal < 999999) {
+        
+        // Evito numeri troppo piccoli che sembrano percentuali o aliquote
+        // Imponibile realistico è >= 50€
+        if (numVal >= 50 && numVal < 999999) {
           foundValue = numVal;
           foundCol = colName;
           break;
