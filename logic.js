@@ -54,6 +54,9 @@ window.addEventListener("DOMContentLoaded", () => {
     TOLERANCE_L4_AMOUNT: 0.50,       // ±50 centesimi (L4 match)
     TOLERANCE_L5_AMOUNT: 50.00,      // ±50 euro (L5 match rilassato - DA REVISIONARE)
     TOLERANCE_STAMP_DUTY: 2.00,      // Marca da bollo
+
+    // Tolleranza forte per match NUM+DATA+TOT
+    TOL_TOT: 0.05,                   // ±5 centesimi
     
     // Soglie per classificazione differenze
     THRESHOLD_SIGNIFICANT_DIFF: 100, // Oltre 100€ = differenza significativa
@@ -917,7 +920,8 @@ function formatDateForUI(dateObj) {
     const result = {
       isNCInvertita: false,
       diff: 0,
-      formula: ""
+      formula: "",
+      kind: "" // "SEGNO_OPPOSTO" oppure "IVA_ZERO_GEST"
     };
 
     if (!adeRecord || !gestRecord) return result;
@@ -925,34 +929,49 @@ function formatDateForUI(dateObj) {
     const adeIvaNum = adeRecord.iva || 0;
     const adeImpNum = adeRecord.imp || 0;
     const adeTotNum = adeRecord.tot || 0;
+
     const gestImpNum = gestRecord.imp || 0;
     const gestIvaNum = gestRecord.iva || 0;
     const gestTotNum = gestRecord.tot || 0;
-    
+
     const diff = adeTotNum - gestTotNum;
     result.diff = diff;
 
-    // 1. ADE_Iva deve essere negativa (nota di credito)
+    // ============================================================
+    // ✅ NUOVO PATTERN: SEGNO OPPOSTO (ADE positivo, GEST negativo o viceversa)
+    // Se |imp|, |iva|, |tot| coincidono ma il totale ha segno opposto => probabile NC
+    // ============================================================
+    const segnoOpposto =
+      (adeTotNum * gestTotNum < 0) && // segni opposti
+      (Math.abs(Math.abs(adeImpNum) - Math.abs(gestImpNum)) <= 0.01) &&
+      (Math.abs(Math.abs(adeIvaNum) - Math.abs(gestIvaNum)) <= 0.01) &&
+      (Math.abs(Math.abs(adeTotNum) - Math.abs(gestTotNum)) <= 0.02);
+
+    if (segnoOpposto) {
+      result.isNCInvertita = true;
+      result.kind = "SEGNO_OPPOSTO";
+      result.formula = `|ADE|≈|GEST| ma segno opposto (tot ADE=${adeTotNum.toFixed(2)} / tot GEST=${gestTotNum.toFixed(2)})`;
+      return result;
+    }
+
+    // ============================================================
+    // ✅ PATTERN VECCHIO: NC “invertita” nel gestionale (IVA=0 ecc.)
+    // ============================================================
     const isNC = adeIvaNum < 0;
-    
-    // 2. Imponibili devono essere uguali (±1 centesimo)
     const imponibileUguale = Math.abs(adeImpNum - gestImpNum) <= 0.01;
-    
-    // 3. IVA gestionale deve essere zero
     const ivaGestionaleZero = Math.abs(gestIvaNum) <= 0.01;
-    
-    // 4. La differenza totale deve essere circa -2 × |ADE_Iva|
-    // Esempio: se ADE_Iva = -500, allora diff dovrebbe essere ≈ -1000
     const expectedDiff = -2 * Math.abs(adeIvaNum);
-    const patternNCInvertita = 
+
+    const patternNCInvertita =
       isNC &&
       imponibileUguale &&
       ivaGestionaleZero &&
       Math.abs(diff - expectedDiff) <= 0.05;
 
     result.isNCInvertita = patternNCInvertita;
-    
+
     if (patternNCInvertita) {
+      result.kind = "IVA_ZERO_GEST";
       result.formula = `diff=${diff.toFixed(2)} ≈ -2×|${adeIvaNum.toFixed(2)}| = ${expectedDiff.toFixed(2)}`;
     }
 
@@ -1465,6 +1484,18 @@ function formatDateForUI(dateObj) {
     // File ADE: mantiene punto decimale (formato americano)
     // File GEST: converte virgola decimale (formato italiano)
     const range = XLSX.utils.decode_range(ws['!ref']);
+
+    // ✅ FIX: converti seriali Excel in DATE solo nelle colonne "Data..."
+    const headerRow = range.s.r; // prima riga del foglio (header)
+    const dateCols = new Set();
+
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const addr = XLSX.utils.encode_cell({ r: headerRow, c: C });
+      const cell = ws[addr];
+      const header = String(cell?.v ?? cell?.w ?? "").toLowerCase().trim();
+      if (header.includes("data")) dateCols.add(C);
+    }
+
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
@@ -1476,7 +1507,7 @@ function formatDateForUI(dateObj) {
           // CASO 1: Seriale Excel per DATE (tra 1 e 80000 E intero)
           // Seriali Excel: 1 = 1/1/1900, 45000 ≈ 2023
           // Importante: deve essere intero per distinguerlo da importi come 610.75
-          if (numValue >= 1 && numValue <= 80000 && Number.isInteger(numValue)) {
+          if (numValue >= 1 && numValue <= 80000 && Number.isInteger(numValue) && dateCols.has(C)) {
             // Converti seriale Excel in Date JavaScript
             const excelEpoch = new Date(1899, 11, 30);
             const msPerDay = 24 * 60 * 60 * 1000;
@@ -1831,8 +1862,8 @@ function formatDateForUI(dateObj) {
     return idx;
   };
 
-  const idxImpAde = findAdeCol("Imponibile/Importo (totale in euro)");
-  const idxIvaAde = findAdeCol("Imposta (totale in euro)");
+  let idxImpAde = findAdeCol("Imponibile/Importo (totale in euro)");
+  let idxIvaAde = findAdeCol("Imposta (totale in euro)");
 
   if (idxImpAde === -1 || idxIvaAde === -1) {
     const missing = [];
@@ -1843,10 +1874,20 @@ function formatDateForUI(dateObj) {
     throw new Error(msg);
   }
 
-  const colImp = H[idxImpAde];
-  const colIva = H[idxIvaAde];
+  // Provo a individuare anche il TOTALE documento per un controllo di coerenza
+  const idxTotAde = normH.findIndex((nh) => {
+    if (!nh) return false;
+    if (!nh.includes("totale")) return false;
+    if (nh.includes("imponibile")) return false;
+    if (nh.includes("imposta")) return false;
+    if (nh.includes("iva")) return false;
+    return true;
+  });
+  const colTotAde = idxTotAde !== -1 ? H[idxTotAde] : null;
+  if (colTotAde) {
+    console.log(`📌 Colonna TOT rilevata in ADE: "${colTotAde}"`);
+  }
 
-  // Sanity check per evitare colonne di aliquota
   const looksLikeAliquota = (idx) => {
     const sample = [];
     for (let i = 0; i < parsed.rows.length && sample.length < 50; i++) {
@@ -1863,6 +1904,70 @@ function formatDateForUI(dateObj) {
     const mostlyAliq = sample.filter(x => commonAliq.has(+x.toFixed(1)) || commonAliq.has(+x.toFixed(0))).length >= Math.max(10, sample.length * 0.7);
     return allSmall && mostlyAliq && distinct.length <= 12;
   };
+
+  const sampleRows = parsed.rows.slice(0, Math.min(200, parsed.rows.length));
+  const calcMismatchWithTotal = (impIdx) => {
+    if (!colTotAde) return { rate: 0, count: 0, mismatch: 0 };
+    let count = 0;
+    let mismatch = 0;
+    const colImpName = H[impIdx];
+    sampleRows.forEach(r => {
+      const tot = parseNumberIT(r[colTotAde]);
+      if (isNaN(tot)) return;
+      const imp = parseNumberIT(r[colImpName]);
+      const iva = parseNumberIT(r[H[idxIvaAde]]);
+      if (isNaN(imp) || isNaN(iva)) return;
+      count++;
+      if (Math.abs((imp + iva) - tot) > 0.99) mismatch++;
+    });
+    return {
+      rate: count ? mismatch / count : 0,
+      count,
+      mismatch
+    };
+  };
+
+  const colNameIsAmountCandidate = (nh) => {
+    if (!nh) return false;
+    if (nh.includes("aliquota") || nh.includes("iva")) return false;
+    if (nh.includes("imposta")) return false;
+    if (nh.includes("piva") || nh.includes("p.iva") || nh.includes("partita")) return false;
+    if (nh.includes("data") || nh.includes("numero") || nh.includes("protocol") || nh.includes("trasm")) return false;
+    if (nh.includes("denomin") || nh.includes("ragione") || nh.includes("codice")) return false;
+    return true;
+  };
+
+  // Se imp+iva non torna con il totale ADE su molte righe, prova a rimappare l'imponibile
+  const currentMismatch = calcMismatchWithTotal(idxImpAde);
+  if (colTotAde && currentMismatch.count >= 5 && currentMismatch.rate > 0.30) {
+    console.warn(`⚠️ ADE: imp+iva non coerenti con il Totale documento (${(currentMismatch.rate * 100).toFixed(1)}% di righe con scarto > 1€). Provo a rimappare l'Imponibile.`);
+
+    let bestIdx = idxImpAde;
+    let bestScore = currentMismatch;
+
+    normH.forEach((nh, idx) => {
+      if (idx === idxImpAde || idx === idxIvaAde || idx === idxTotAde) return;
+      if (!colNameIsAmountCandidate(nh)) return;
+
+      const score = calcMismatchWithTotal(idx);
+      if (score.count >= 5 && score.rate + 0.0001 < bestScore.rate) {
+        bestIdx = idx;
+        bestScore = score;
+      }
+    });
+
+    if (bestIdx !== idxImpAde && bestScore.rate + 0.0001 < currentMismatch.rate) {
+      console.warn(`✅ ADE: rimappata colonna Imponibile su "${H[bestIdx]}" usando il Totale documento (righe incoerenti: ${(bestScore.rate * 100).toFixed(1)}% vs ${(currentMismatch.rate * 100).toFixed(1)}%).`);
+      idxImpAde = bestIdx;
+    } else {
+      const msg = "❌ ADE: Imponibile+IVA non coerenti con il Totale documento. Interrompo per evitare import errati.";
+      console.error(msg, { currentMismatch, colImp: H[idxImpAde], colIva: H[idxIvaAde], colTot: colTotAde });
+      throw new Error(msg);
+    }
+  }
+
+  const colImp = H[idxImpAde];
+  const colIva = H[idxIvaAde];
 
   if (looksLikeAliquota(idxImpAde)) {
     const msg = "❌ ADE: la colonna selezionata per Imponibile sembra un'ALIQUOTA IVA (valori tutti piccoli).";
@@ -1945,24 +2050,46 @@ function formatDateForUI(dateObj) {
     const impParsed = parseNumberIT(impRaw);
     const ivaParsed = cleanIVAValue(ivaRaw, piva);
 
-    // ➕/➖ Gestione segno: Note di credito negative, fatture positive
+    // ============================================================
+    // ✅ NORMALIZZAZIONE SEGNO (ULTRA FIX)
+    // - ADE è source of truth (mai ricalcolare IVA)
+    // - Evita double-negation su TD04
+    // - Se ADE arriva già negativo (imp/iva), rispettalo SEMPRE anche se tipo documento è sbagliato/vuoto
+    // ============================================================
+
+    const tipoDoc = (tipoDocRaw || "").trim().toUpperCase();
+    const isTD04 = (tipoDoc === "TD04");
+
+    // segnali “nota credito” anche senza TD04
+    const isNCByTipo = tipoDoc.includes("TD04") || tipoDoc.includes("NOTA") || tipoDoc.includes("NC");
+    const isNCBySign = (impParsed < 0) || (ivaParsed < 0);
+
     let imp = impParsed;
     let iva = ivaParsed;
+    let adeTechNote = "";
 
-    if (!tipoDocRaw) {
-      console.warn(`⚠️ ADE [${num}]: Tipo documento mancante/vuoto`);
+    // 1) Se è TD04 (o nota credito per tipo) e gli importi sono positivi, rendili negativi
+    //    Se sono già negativi, NON toccare (no double-negation)
+    if (isTD04 || isNCByTipo) {
+      if (imp > 0) imp = -imp;
+      if (iva > 0) iva = -iva;
     }
 
-    if (tipoDocRaw.includes("NOTA") || tipoDocRaw.includes("NC")) {
-      // Nota di credito: imponibile e IVA devono essere negativi
-      imp = -Math.abs(impParsed);
-      iva = -Math.abs(ivaParsed);
-    } else {
-      // Fatture normali: imponibile e IVA sempre positivi
-      imp = Math.abs(impParsed);
-      iva = Math.abs(ivaParsed);
+    // 2) Se ADE arriva già con segno negativo (anche senza tipoDoc), lo rispettiamo SEMPRE
+    //    (questa è la parte che ti salva TIM/ENI e tutte le righe con tipo documento ambiguo)
+    if (isNCBySign) {
+      imp = -Math.abs(imp);
+      iva = -Math.abs(iva);
     }
 
+    // LOG DIAGNOSTICO (solo per righe potenzialmente NC)
+    if (isTD04 || isNCByTipo || isNCBySign) {
+      console.log(
+        `🧾 NC_CHECK [${num}] tipo="${tipoDocRaw}" impRaw=${impRaw} ivaRaw=${ivaRaw} -> imp=${imp} iva=${iva}`
+      );
+    }
+
+    // Totale coerente con i valori ADE normalizzati
     let tot = +(imp + iva).toFixed(2);
     
     // 🔍 DEBUG: Valori dopo parsing
@@ -1996,8 +2123,6 @@ function formatDateForUI(dateObj) {
       console.log("🔥🔥🔥 FINE PARSING FATTURA 2528012466 🔥🔥🔥");
     }
     
-    const tipoDoc = tipoDocRaw;
-
     recs.push({
       src: "ADE",
       num,
@@ -2013,8 +2138,9 @@ function formatDateForUI(dateObj) {
       imp,
       iva,
       tot,
-      tipoDoc,
-      isForeign: isForeignPiva(piva)
+      tipoDoc: tipoDocRaw,
+      isForeign: isForeignPiva(piva),
+      techNote: adeTechNote
     });
   }
 
@@ -2028,7 +2154,10 @@ function formatDateForUI(dateObj) {
 }
 
    // ---------- GESTIONALE FATTURE ACQUISTO (FILE B) ----------
-function buildGestAcqRecords(parsed) {
+function buildGestAcqRecords(parsed, options = {}) {
+  const { isNotesCredit = false, fileName = "" } = options;
+  const inferredNC = /nota|note|nc|credito/i.test(fileName || "");
+  const isGestNotesCredit = isNotesCredit || inferredNC;
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
 
@@ -2186,14 +2315,22 @@ for (const r of parsed.rows) {
   const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
   // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
-  const imp = colImp ? parseNumberIT(r[colImp]) : 0;
-  const iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;  // Valida IVA vs P.IVA
+  let imp = colImp ? parseNumberIT(r[colImp]) : 0;
+  let iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;  // Valida IVA vs P.IVA
 
   let tot = 0;
   if (colTot) {
     tot = parseNumberIT(r[colTot]);
   } else {
     tot = +(imp + iva).toFixed(2);
+  }
+
+  // ✅ FIX NC Gestionale: se il file è una Nota Credito, forziamo segno negativo
+  // (Contel talvolta esporta NC con importi positivi)
+  if (isGestNotesCredit === true) {
+    imp = -Math.abs(imp);
+    iva = -Math.abs(iva);
+    tot = -Math.abs(tot);
   }
   
   // 🚨 VALIDAZIONE MAPPING ERRATO GESTIONALE - Rileva casi impossibili
@@ -2260,7 +2397,10 @@ function isDateHeaderName(hdr) {
 }
 
  // ---------- GESTIONALE NOTE CREDITO (FILE C) ----------
-function buildGestNcRecords(parsed) {
+function buildGestNcRecords(parsed, options = {}) {
+  const { isNotesCredit = true, fileName = "" } = options;
+  const inferredNC = /nota|note|nc|credito/i.test(fileName || "");
+  const isGestNotesCredit = isNotesCredit || inferredNC;
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
 
@@ -2392,14 +2532,22 @@ function buildGestNcRecords(parsed) {
     const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
 
     // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
-    const imp = colImp ? parseNumberIT(r[colImp]) : 0;
-    const iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;  // Valida IVA vs P.IVA
+    let imp = colImp ? parseNumberIT(r[colImp]) : 0;
+    let iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;  // Valida IVA vs P.IVA
 
     let tot = 0;
     if (colTot) {
       tot = parseNumberIT(r[colTot]);
     } else {
       tot = +(imp + iva).toFixed(2);
+    }
+
+    // ✅ FIX NC Gestionale: se sto caricando il file "NOTE CREDITO", il segno deve essere negativo
+    // (in Contel spesso le NC devono essere negative ma possono arrivare positive dal file)
+    if (isGestNotesCredit === true) {
+      imp = -Math.abs(imp);
+      iva = -Math.abs(iva);
+      tot = -Math.abs(tot);
     }
 
     const docField = colDoc     ? String(r[colDoc] || "").toUpperCase()     : "";
@@ -2472,17 +2620,50 @@ function buildGestNcRecords(parsed) {
  */
 function normalizeInvoiceForMatch(num) {
   if (!num) return "";
-  
-  let s = String(num).toUpperCase().trim();
-  
-  // Rimuovi caratteri non alfanumerici comuni (inclusi * e @ che possono apparire nei CSV)
+
+  // 🔧 FIX: rimuove apici/virgolette (ADE spesso ha 2523335617' o '8U00126007')
+  let s = String(num)
+    .replace(/["']/g, "")
+    .toUpperCase()
+    .trim();
+
+  // Togli separatori e schifezze comuni
   s = s.replace(/[\/\-_\s.*@#]/g, "");
-  
-  // Rimuovi zeri iniziali solo dalla parte numerica
+
+  // 🔧 EXTRA SAFE: se rimane qualcosa di non alfanumerico, lo elimino
+  s = s.replace(/[^A-Z0-9]/g, "");
+
+  // Rimuovi zeri iniziali dopo eventuale prefisso lettere
   // Es: "F000123" -> "F123", "000586" -> "586"
   s = s.replace(/^([A-Z]*)0+/, "$1");
-  
+
   return s;
+}
+
+// ===============================
+// 🔐 STEP ULTRA: MATCH per chiavi forti (NUM + DATA + TOTALE)
+// ===============================
+function strongKeyMatch(a, g) {
+  if (!a || !g) return false;
+
+  const normNum = (v) => normalizeInvoiceForMatch(v || "");
+  const numOk =
+    normNum(a.num) === normNum(g.num) ||
+    (String(a.numDigits || "") && String(g.numDigits || "") && String(a.numDigits) === String(g.numDigits));
+
+  // Data: confronta oggetto Date se disponibile, altrimenti stringhe normalizzate
+  const sameDate = () => {
+    if (a.data && g.data) return a.data.getTime() === g.data.getTime();
+    if (a.dataIso && g.dataIso) return a.dataIso === g.dataIso;
+    if (a.dataStr && g.dataStr) return a.dataStr === g.dataStr;
+    return false;
+  };
+  const dateOk = sameDate();
+
+  const totTol = MATCH_CONFIG.TOL_TOT || MATCH_CONFIG.TOLERANCE_ROUNDING || 0.05;
+  const totOk = Math.abs((a.tot || 0) - (g.tot || 0)) <= totTol;
+
+  return numOk && dateOk && totOk;
 }
 
 // ============================================================
@@ -2652,13 +2833,15 @@ function classifyMatchNote(diffTotale, adeRecord, gestRecord, ncInfo, criterio) 
       status = "MATCH_OK";
     }
   }
-  // 2. Nota di credito invertita
+  // 2. Segno opposto (probabile Nota di Credito)
+  else if (ncInfo.isNCInvertita && ncInfo.kind === "SEGNO_OPPOSTO") {
+    status = "MATCH_OK";
+    note = `⚠ Probabile NOTA DI CREDITO: ADE e Gestionale hanno stessi importi in valore assoluto ma segno opposto. ${ncInfo.formula}`;
+  }
+  // 3. Nota di credito invertita (pattern storico IVA=0 nel gestionale)
   else if (ncInfo.isNCInvertita) {
-    note = `⚠ POSSIBILE NOTA DI CREDITO GESTITA AL CONTRARIO NEL GESTIONALE: ` +
-           `imponibile uguale (€${(adeRecord.imp || 0).toFixed(2)}), ` +
-           `ADE ha IVA negativa (€${(adeRecord.iva || 0).toFixed(2)}), ` +
-           `GEST IVA = 0 e totale diverso (${ncInfo.formula}). ` +
-           `Verificare registrazione nel gestionale.`;
+    note = `⚠ POSSIBILE NOTA DI CREDITO GESTITA AL CONTRARIO NEL GESTIONALE: ${ncInfo.formula}`;
+    status = "MATCH_FIX";
   }
   // 3. Arrotondamenti
   else if (diffAssoluta <= MATCH_CONFIG.TOLERANCE_ROUNDING) {
@@ -3351,6 +3534,38 @@ function matchRecords(adeList, gestList) {
       }
     }
 
+    // ===============================
+    // 🚀 STEP ULTRA – MATCH_FIX per chiavi forti (NUM+DATA+TOTALE)
+    // ===============================
+    {
+      const adeStill = ade.filter(a => !matchedAde.has(a.idx));
+      const gestStill = gest.filter(g => !matchedGest.has(g.idx));
+
+      for (const a of adeStill) {
+        if (matchedAde.has(a.idx)) continue;
+
+        const candidate = gestStill.find(g => !matchedGest.has(g.idx) && strongKeyMatch(a, g));
+        if (candidate) {
+          matchedAde.add(a.idx);
+          matchedGest.add(candidate.idx);
+
+          const diffTot = (a.tot || 0) - (candidate.tot || 0);
+          const note = "⚠ Match per chiavi forti (NUM+DATA+TOTALE). Fornitore non agganciato automaticamente (P.IVA mancante o denominazione diversa). Verifica consigliata.";
+
+          results.push({
+            ADE: a,
+            GEST: candidate,
+            STATUS: "MATCH_FIX",
+            CRITERIO: "NUM_DATA_TOT",
+            NOTE_MATCH: note,
+            ORIGINE: "MATCH",
+            DIFF_TOTALE: diffTot,
+            FLAG_REVISIONE: "SI"
+          });
+        }
+      }
+    }
+
     // 🧠 PASS 5: POPOLA NOTE DIAGNOSTICHE per i MATCH_FIX
     // Aggiunge una spiegazione automatica nel campo note per i match incerti
     for (const res of results) {
@@ -3404,6 +3619,79 @@ function matchRecords(adeList, gestList) {
     }
 
     // ============================================================
+    // 🚀 STEP ULTRA (FIX DEFINITIVO): unisci SOLO_ADE + SOLO_GEST
+    // Chiavi forti calcolate al volo: NUM(normalizzato) + DATA(normalizzata) + TOTALE
+    // (non ci fidiamo di numDigits/dataIso se arrivano sporchi)
+    // ============================================================
+    (function ultraMergeSolo() {
+      const TOL = MATCH_CONFIG.TOL_TOT ?? MATCH_CONFIG.TOLERANCE_ROUNDING ?? 0.05;
+
+      const isActive = (r) => r && !r.deleted;
+
+      // 🔑 chiave forte (sempre ricalcolata)
+      const keyOf = (rec) => {
+        const numKey = normalizeInvoiceNumber(rec?.num || "", false);     // solo cifre
+        const dateKey = normalizeDateFlexible(rec?.dataRaw || rec?.dataStr || rec?.dataIso || ""); // YYYY-MM-DD
+        return `${numKey}|${dateKey}`;
+      };
+
+      const totVal = (rec) => Number(rec?.tot ?? 0);
+
+      const soloAde = results.filter(r => isActive(r) && r.STATUS === "SOLO_ADE" && r.ADE);
+      const soloGest = results.filter(r => isActive(r) && r.STATUS === "SOLO_GEST" && r.GEST);
+
+      // indicizza SOLO_GEST per chiave
+      const map = new Map();
+      for (const gr of soloGest) {
+        const k = keyOf(gr.GEST);
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push(gr);
+      }
+
+      let mergedCount = 0;
+
+      for (const ar of soloAde) {
+        const a = ar.ADE;
+        const k = keyOf(a);
+        const candidates = map.get(k);
+        if (!candidates || !candidates.length) continue;
+
+        const aTot = totVal(a);
+        let pickIndex = -1;
+
+        for (let i = 0; i < candidates.length; i++) {
+          const gTot = totVal(candidates[i].GEST);
+          if (Math.abs(aTot - gTot) <= TOL) {
+            pickIndex = i;
+            break;
+          }
+        }
+        if (pickIndex < 0) continue;
+
+        const gr = candidates.splice(pickIndex, 1)[0];
+        const g = gr.GEST;
+
+        // ✅ unisco nella riga ADE
+        ar.GEST = g;
+        ar.STATUS = "MATCH_FIX";
+        ar.ORIGINE = "MATCH";
+        ar.CRITERIO = "NUM_DATA_TOT";
+        ar.NOTE_MATCH =
+          "⚠ Match ULTRA (NUM+DATA+TOTALE). Fornitore/P.IVA non coerenti o mancanti nel gestionale. Verifica consigliata.";
+        ar.FLAG_REVISIONE = "DA_REVISIONARE";
+        ar.DIFF_TOTALE = (aTot - totVal(g));
+
+        // ❌ nascondo la riga SOLO_GEST duplicata
+        gr.deleted = true;
+        gr.STATUS = "MERGED_ULTRA";
+
+        mergedCount++;
+      }
+
+      console.log(`🚀 ULTRA MERGE completato: ${mergedCount} righe unite`);
+    })();
+
+    // ============================================================
     // NORMALIZZAZIONE FINALE: Coerenza STATUS / ORIGINE
     // ============================================================
     for (const r of results) {
@@ -3416,6 +3704,10 @@ function matchRecords(adeList, gestList) {
       if (r.DIFF_TOTALE === undefined || r.DIFF_TOTALE === null || isNaN(r.DIFF_TOTALE)) {
         r.DIFF_TOTALE = 0;
       }
+
+      if (r.FLAG_REVISIONE === undefined || r.FLAG_REVISIONE === null) {
+        r.FLAG_REVISIONE = "";
+      }
       
       // 🎯 CONTROLLO COERENZA STATUS / ORIGINE
       // Garantisce che ORIGINE rispecchi sempre STATUS
@@ -3425,6 +3717,8 @@ function matchRecords(adeList, gestList) {
         r.ORIGINE = "SOLO_GESTIONALE";
       } else if (r.STATUS === "SOLO_ADE") {
         r.ORIGINE = "SOLO_ADE";
+      } else if (r.STATUS === "MERGED_ULTRA") {
+        r.ORIGINE = "MERGED_ULTRA";
       } else if (!r.ORIGINE) {
         // Caso anomalo: STATUS non riconosciuto
         console.warn(`⚠️ Record con STATUS sconosciuto: "${r.STATUS}" - possibile bug nel matching`, r);
@@ -3974,7 +4268,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   function exportToCSV(results, fileLabel) {
     if (!results || !results.length) return;
 
-    const active = results.filter(r => !r.deleted);
+    const active = results.filter(r => !r.deleted && r.STATUS !== "MERGED_ULTRA");
 
     if (!active.length) return;
 
@@ -4029,11 +4323,20 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       lineParts.push(formatNumberForExcel(row.DIFF_TOTALE || 0));
 
       // Stato, origine, criterio, nota
+      const criterioOut = row.CRITERIO || row.criterio || "";
+      const flagOut = row.FLAG_REVISIONE || (row.flagRevisione ? "SI" : "");
+
       lineParts.push(`"${cleanStr(row.STATUS)}"`);
       lineParts.push(`"${cleanStr(row.ORIGINE || "")}"`);
-      lineParts.push(`"${cleanStr(row.CRITERIO)}"`);
-      lineParts.push(`"${cleanStr(row.NOTE_MATCH || row.matchNote || "")}"`);  // Usa NOTE_MATCH se presente
-      lineParts.push(`"${cleanStr(row.FLAG_REVISIONE || "")}"`);
+      lineParts.push(`"${cleanStr(criterioOut)}"`);
+
+      const noteOut = [
+        (row.NOTE_MATCH || row.matchNote || row.noteMatch || ""),
+        (a && a.techNote) ? a.techNote : ""
+      ].filter(Boolean).join(" | ");
+
+      lineParts.push(`"${cleanStr(noteOut)}"`);  // Usa NOTE_MATCH + ade.techNote se presente
+      lineParts.push(`"${cleanStr(flagOut)}"`);
       rows.push(lineParts.join(";"));
     }
 
@@ -4571,8 +4874,8 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 
       // 🟩 2) SOLO ORA costruisco i record
       const adeRecords = buildAdeRecords(parsedA);
-      const gestAcq = buildGestAcqRecords(parsedB);
-      const gestNc  = parsedC.rows.length ? buildGestNcRecords(parsedC) : [];
+      const gestAcq = buildGestAcqRecords(parsedB, { fileName: fB?.name, isNotesCredit: false });
+      const gestNc  = parsedC.rows.length ? buildGestNcRecords(parsedC, { fileName: fC?.name, isNotesCredit: true }) : [];
 
       const gestRecords = gestAcq.concat(gestNc);
 
@@ -4966,15 +5269,16 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     // >>> LOGICA DIAGNOSTICA AUTOMATICA <<<
     // Se c'è già una nota manuale dell'utente, la manteniamo.
     // Altrimenti, generiamo il report diagnostico.
+    const adeExtra = (a && a.techNote) ? `\n${a.techNote}\n` : "";
     if (row.matchNote && row.matchNote.trim() !== "") {
-        editMatchNote.value = row.matchNote;
+      editMatchNote.value = row.matchNote + adeExtra;
     } else {
-        // Genera diagnosi automatica se siamo in FIX o se vogliamo info
-        if (a && g) {
-            editMatchNote.value = generateDiagnosticReport(a, g, row.CRITERIO).trim();
-        } else {
-            editMatchNote.value = (row.CRITERIO || "").trim();
-        }
+      // Genera diagnosi automatica se siamo in FIX o se vogliamo info
+      if (a && g) {
+        editMatchNote.value = adeExtra + generateDiagnosticReport(a, g, row.CRITERIO).trim();
+      } else {
+        editMatchNote.value = adeExtra + (row.CRITERIO || "").trim();
+      }
     }
 
     editRowInfo.textContent = `Riga #${row.rowId} – Stato attuale: ${row.STATUS}`;
@@ -5644,6 +5948,11 @@ function renderPeriodKpi(results) {
     let grandIva = 0;
     let grandTot = 0;
 
+    // DEBUG: controlla quanti IVA negativi ci sono (utile per scoprire NC ribaltate)
+    let dbgNegIva = 0;
+    let dbgPosIva = 0;
+    let dbgTd04 = 0;
+
     lastAdeRecords.forEach(r => {
       // ✅ Usa la data se presente, altrimenti crea un bucket "SENZA_DATA" per non perdere righe
       let key = null;
@@ -5665,6 +5974,10 @@ function renderPeriodKpi(results) {
       const imp = r.imp || 0;
       const iva = r.iva || 0;
       const tot = r.tot || 0;
+
+      if (iva < 0) dbgNegIva++;
+      if (iva > 0) dbgPosIva++;
+      if ((String(r.tipoDoc || "").toUpperCase().trim() === "TD04")) dbgTd04++;
 
       groups[key].count++;
       groups[key].imp += imp;
@@ -5722,6 +6035,8 @@ function renderPeriodKpi(results) {
     // Attiva il ridimensionamento sulla tabella appena renderizzata
     const tableEl = document.getElementById("vatTable");
     if (tableEl) createResizableTable(tableEl);
+
+    console.log(`📊 VAT_DEBUG: IVA+ ${dbgPosIva} | IVA- ${dbgNegIva} | TD04 ${dbgTd04} | grandIva=${grandIva.toFixed(2)}`);
   }
 
   // Listener per aggiornare la tabella quando si clicca sul TAB
