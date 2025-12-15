@@ -794,6 +794,10 @@ function formatDateForUI(dateObj) {
       const num = parseFloat(s);
       return isNaN(num) ? 0.0 : num;
   }
+  // Esempi:
+  //   "9,24"    → 9.24
+  //   "-18,09"  → -18.09
+  //   "1.234,50" → 1234.5
 
   // ============================================================
   // 🔢 UTILITIES P.IVA E NUMERI FATTURA
@@ -1098,14 +1102,14 @@ function formatDateForUI(dateObj) {
       adeNumNorm: normalizeInvoiceNumber(adeRow?.ADE_Num || "", false),
       adeDen: (adeRow?.ADE_Den || adeRow?.ADE_Denominazione || "").toString().trim(),
       adeDenNorm: normalizeName(adeRow?.ADE_Den || adeRow?.ADE_Denominazione || ""), // Già normalizzato
-      adeTot: Number(adeRow?.ADE_Totale ?? adeRow?.ADE_Imponibile ?? 0.0),
+      adeTot: parseNumberIT(adeRow?.ADE_Totale ?? adeRow?.ADE_Imponibile ?? 0.0),
 
       // chiavi lato GEST
       gestNum: (gestRow.GEST_Num || "").toString().trim(),
       gestNumNorm: normalizeInvoiceNumber(gestRow.GEST_Num || ""),
       gestDen: (gestRow.GEST_Den || gestRow.GEST_Denominazione || "").toString().trim(),
       gestDenNorm: normalizeName(gestRow.GEST_Den || gestRow.GEST_Denominazione || ""),
-      gestTot: Number(gestRow?.GEST_Totale ?? gestRow?.GEST_Imponibile ?? 0.0),
+      gestTot: parseNumberIT(gestRow?.GEST_Totale ?? gestRow?.GEST_Imponibile ?? 0.0),
 
       createdAt: new Date().toISOString(),
     };
@@ -1166,7 +1170,7 @@ function formatDateForUI(dateObj) {
       const selPiva = document.getElementById("selGestPiva");
       const selDen  = document.getElementById("selGestDen");
       const selData = document.getElementById("selGestData");
-      const selDataReg = document
+      const selDataReg = document.getElementById("selGestDataReg");
       const selImp  = document.getElementById("selGestImp");
       const selIva  = document.getElementById("selGestIva");
       const selTot  = document.getElementById("selGestTot");
@@ -1186,6 +1190,7 @@ function formatDateForUI(dateObj) {
       fillSelectWithHeaders(selPiva, headers, cfg.piva);
       fillSelectWithHeaders(selDen,  headers, cfg.den);
       fillSelectWithHeaders(selData, headers, cfg.data);
+      fillSelectWithHeaders(selDataReg, headers, cfg.dataReg);
       fillSelectWithHeaders(selImp,  headers, cfg.imp);
       fillSelectWithHeaders(selIva,  headers, cfg.iva);
       fillSelectWithHeaders(selTot,  headers, cfg.tot);
@@ -1202,6 +1207,7 @@ function formatDateForUI(dateObj) {
           piva: selPiva.value || null,
           den:  selDen.value  || null,
           data: selData.value || null,
+          dataReg: selDataReg ? (selDataReg.value || null) : null,
           imp:  selImp.value  || null,
           iva:  selIva.value  || null,
           tot:  selTot.value  || null,
@@ -1398,7 +1404,7 @@ function formatDateForUI(dateObj) {
     const adePivaNorm = normalizePIVA(adeRow.ADE_PIVA || "");
     const adeNumNorm = normalizeInvoiceNumber(adeRow.ADE_Num || "", false); // Usa la normalizzazione solo cifre
     const adeDenNorm = normalizeName(adeRow?.ADE_Den || adeRow?.ADE_Denominazione || "");
-    const adeTot = Number(adeRow?.ADE_Totale ?? adeRow?.ADE_Imponibile ?? 0.0);
+    const adeTot = parseNumberIT(adeRow?.ADE_Totale ?? adeRow?.ADE_Imponibile ?? 0.0);
 
     // 1. filtro le regole per P.IVA
     const candidateRules = rulesArr.filter(r => {
@@ -1829,10 +1835,12 @@ function formatDateForUI(dateObj) {
 
   const colNum   = cfg.num  || findCol(H, h, "numero fattura / documento", "numero fattura", "numero documento");
 
-  // Forza sempre una colonna DATA con pattern espliciti, ignorando cfg.data sporche
-  const colData  = findCol(H, h, "data emissione", "data fattura", "data registrazione");
-  if (!colData || !String(colData).toLowerCase().includes("data")) {
-    const msg = "❌ Colonna DATA ADE non trovata: atteso 'Data emissione' / 'Data fattura'";
+  // Date ADE: priorità Data ricezione, fallback Data emissione
+  const colDataRicez = findCol(H, h, "data ricezione", "data di ricezione", "data ricez");
+  const colDataEmiss = findCol(H, h, "data emissione", "data fattura", "data registrazione");
+  const colData  = colDataRicez || colDataEmiss;
+  if (!colData) {
+    const msg = "❌ Colonna DATA ADE non trovata: atteso 'Data ricezione' o 'Data emissione'";
     console.error(msg, H);
     throw new Error(msg);
   }
@@ -1985,7 +1993,7 @@ function formatDateForUI(dateObj) {
   // 🔍 DEBUG: Log mapping colonne per diagnostica
   console.log("📋 MAPPING FINALE COLONNE ADE:");
   console.log(`   Numero Fattura: "${colNum}"`);
-  console.log(`   Data: "${colData}"`);
+  console.log(`   Data (priorità ricezione): "${colDataRicez || colDataEmiss}"`);
   console.log(`   P.IVA Fornitore: "${colPivaFor}"`);
   console.log(`   Denominazione: "${colDenFor}"`);
   console.log(`   ⭐ Imponibile: "${colImp}"`);
@@ -2022,10 +2030,24 @@ function formatDateForUI(dateObj) {
     // ===== GESTIONE DATE ADE - FORMATO ITALIANO RIGIDO =====
     // Le date ADE arrivano SEMPRE in formato italiano DD/MM/YYYY
     // Usiamo normalizeDateItalyStrict per parsing rigido senza ambiguità
-    const dataRaw = colData ? (r[colData] || "") : "";         // Valore originale dal CSV
-    const dataIso = normalizeDateItalyStrict(dataRaw);         // "YYYY-MM-DD" con parsing rigido italiano
-    const data = parseDateFlexible(dataIso);                   // Oggetto Date per confronti (usa ISO già normalizzato)
-    const dataStr = dataIso ? formatDateIT(dataIso) : "";     // "DD/MM/YYYY" per display
+    const dataRawRicez = colDataRicez ? (r[colDataRicez] || "") : "";
+    const dataRawEmiss = colDataEmiss ? (r[colDataEmiss] || "") : "";
+
+    // ISO separati (servono per scelta base-data IVA)
+    const dataRicezIso = dataRawRicez ? normalizeDateFlexible(dataRawRicez) : "";
+    const dataEmissIso = dataRawEmiss ? normalizeDateFlexible(dataRawEmiss) : "";
+
+    // Data per MATCH (priorità emissione, fallback ricezione)
+    const dataRaw = dataRawEmiss || dataRawRicez || "";
+    const dataIso = dataEmissIso || dataRicezIso || "";
+    const data = dataIso ? parseDateFlexible(dataIso) : null;
+    const dataStr = dataIso ? formatDateIT(dataIso) : "";
+    const dateSource = dataEmissIso ? "emissione" : (dataRicezIso ? "ricezione" : "nessuna");
+
+    // Data per IVA (default ricezione, fallback emissione)
+    const vatDateIso = dataRicezIso || dataEmissIso || "";
+    const vatDate = vatDateIso ? parseDateFlexible(vatDateIso) : null;
+
 
     // ===== GESTIONE IMPORTI (NESSUN AUTO-FIX) =====
     const impRaw = r[colImp] || "";
@@ -2131,10 +2153,21 @@ function formatDateForUI(dateObj) {
       denNorm: normalizeName(den),
       piva,
       pivaDigits: onlyDigits(piva),
-      dataRaw,   // valore originale dal file
-      dataIso,   // "YYYY-MM-DD" normalizzato
-      data,      // oggetto Date per tutti i confronti
-      dataStr,   // "DD/MM/YYYY" per tabella + export CSV
+      dataRawRicez,
+      dataRawEmiss,
+      dataRicezIso,
+      dataEmissIso,
+
+      // Matching (data fattura): emissione -> fallback ricezione
+      dataRaw,
+      dataIso,
+      data,
+      dataStr,
+      dateSource,
+
+      // IVA (periodo): ricezione -> fallback emissione
+      vatDateIso,
+      vatDate,
       imp,
       iva,
       tot,
@@ -5925,59 +5958,67 @@ function renderPeriodKpi(results) {
   // SEZIONE LIQUIDAZIONE IVA (ADE)
   // ===============================================================
 
-  function renderVatLiquidation() {
-    const tbody = document.getElementById("vatTbody");
-    const elImp = document.getElementById("vatTotImp");
-    const elIva = document.getElementById("vatTotIva");
-    const elDoc = document.getElementById("vatTotDoc");
-    
-    if (!tbody) return;
-    tbody.innerHTML = "";
+  function getYearFromIso(iso) {
+    if (!iso || typeof iso !== "string") return null;
+    const m = iso.match(/^(\d{4})-\d{2}-\d{2}$/);
+    return m ? parseInt(m[1], 10) : null;
+  }
 
-    if (!lastAdeRecords || lastAdeRecords.length === 0) {
-      tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:20px;'>Nessun dato ADE caricato.</td></tr>";
-      if(elImp) elImp.textContent = "0,00";
-      if(elIva) elIva.textContent = "0,00";
-      if(elDoc) elDoc.textContent = "0,00";
-      return;
+  function getVatIsoFromRecord(r, basis) {
+    if (!r) return "";
+    const b = String(basis || "RICEZIONE").toUpperCase();
+    if (b === "EMISSIONE") return r.dataEmissIso || "";
+    if (b === "AUTO") return r.vatDateIso || r.dataRicezIso || r.dataEmissIso || "";
+    // RICEZIONE (default): ricezione -> fallback emissione
+    return r.dataRicezIso || r.vatDateIso || r.dataEmissIso || "";
+  }
+
+  function detectVatTargetYear(records, basis) {
+    const freq = new Map();
+    for (const r of records || []) {
+      const y = getYearFromIso(getVatIsoFromRecord(r, basis));
+      if (!y) continue;
+      freq.set(y, (freq.get(y) || 0) + 1);
     }
+    if (freq.size === 0) return new Date().getFullYear();
+    let bestYear = null;
+    let bestCount = -1;
+    for (const [y, c] of freq.entries()) {
+      if (c > bestCount) { bestYear = y; bestCount = c; }
+    }
+    return bestYear;
+  }
 
-    // Raggruppa per mese (YYYY-MM) — includi ANCHE righe senza data per preservare i totali ADE
+  function shouldIncludeInVatYear(r, targetYear, includePrevYear, basis) {
+    const y = getYearFromIso(getVatIsoFromRecord(r, basis));
+    if (!y) return false;
+    if (y === targetYear) return true;
+    if (includePrevYear && y === (targetYear - 1)) return true;
+    return false;
+  }
+
+  function buildVatGroups(records, basis, includePrevYear) {
+    const targetYear = detectVatTargetYear(records, basis);
     const groups = {};
     let grandImp = 0;
     let grandIva = 0;
     let grandTot = 0;
+    let excludedNoDate = 0;
+    let excludedOutOfYear = 0;
 
-    // DEBUG: controlla quanti IVA negativi ci sono (utile per scoprire NC ribaltate)
-    let dbgNegIva = 0;
-    let dbgPosIva = 0;
-    let dbgTd04 = 0;
+    (records || []).forEach(r => {
+      const inScope = shouldIncludeInVatYear(r, targetYear, includePrevYear, basis);
+      if (!inScope) { excludedOutOfYear++; return; }
 
-    lastAdeRecords.forEach(r => {
-      // ✅ Usa la data se presente, altrimenti crea un bucket "SENZA_DATA" per non perdere righe
-      let key = null;
-      if (r.data) {
-        key = monthKeyFromDate(r.data);
-      } else if (r.dataIso && r.dataIso.length >= 7) {
-        // es. "2024-03-15" -> "2024-03"
-        key = r.dataIso.slice(0, 7);
-      } else {
-        key = "SENZA_DATA";
-      }
+      const iso = getVatIsoFromRecord(r, basis);
+      if (!iso || iso.length < 7) { excludedNoDate++; return; }
 
-      const label = key === "SENZA_DATA" ? "(Senza data)" : monthLabelFromKey(key);
+      const key = iso.slice(0, 7); // YYYY-MM
+      if (!groups[key]) groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, label: monthLabelFromKey(key) };
 
-      if (!groups[key]) {
-        groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, dateObj: r.data, label };
-      }
-      
       const imp = r.imp || 0;
       const iva = r.iva || 0;
       const tot = r.tot || 0;
-
-      if (iva < 0) dbgNegIva++;
-      if (iva > 0) dbgPosIva++;
-      if ((String(r.tipoDoc || "").toUpperCase().trim() === "TD04")) dbgTd04++;
 
       groups[key].count++;
       groups[key].imp += imp;
@@ -5989,54 +6030,98 @@ function renderPeriodKpi(results) {
       grandTot += tot;
     });
 
-    // Ordina chiavi
-    const keys = Object.keys(groups).sort((a, b) => {
-      if (a === "SENZA_DATA") return 1;
-      if (b === "SENZA_DATA") return -1;
-      return a.localeCompare(b);
-    });
+    const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
 
-    keys.forEach(key => {
-      const g = groups[key];
+    return { groups, keys, grandImp, grandIva, grandTot, targetYear, excludedNoDate, excludedOutOfYear };
+  }
+
+
+  function renderVatLiquidation() {
+    const tbody = document.getElementById("vatTbody");
+    const elImp = document.getElementById("vatTotImp");
+    const elIva = document.getElementById("vatTotIva");
+    const elDoc = document.getElementById("vatTotDoc");
+
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!lastAdeRecords || lastAdeRecords.length === 0) {
+      tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:20px;'>Nessun dato ADE caricato.</td></tr>";
+      if (elImp) elImp.textContent = "€ 0,00";
+      if (elIva) elIva.textContent = "€ 0,00";
+      if (elDoc) elDoc.textContent = "€ 0,00";
+      return;
+    }
+
+    // UI state (persistito)
+    const lsBasisKey = "contaibl-vat-date-basis";
+    const lsPrevKey  = "contaibl-vat-include-prev-year";
+
+    let basis = (localStorage.getItem(lsBasisKey) || "RICEZIONE").toUpperCase();
+    const selBasis = document.getElementById("vatDateBasis");
+    if (selBasis) {
+      selBasis.value = basis;
+      selBasis.onchange = () => {
+        localStorage.setItem(lsBasisKey, selBasis.value);
+        renderVatLiquidation();
+      };
+      basis = String(selBasis.value || basis).toUpperCase();
+    }
+
+    let includePrevYear = localStorage.getItem(lsPrevKey) === "true";
+    const cb = document.getElementById("vatIncludePrevYear");
+    if (cb) {
+      cb.checked = includePrevYear;
+      cb.onchange = () => {
+        localStorage.setItem(lsPrevKey, cb.checked ? "true" : "false");
+        renderVatLiquidation();
+      };
+      includePrevYear = cb.checked;
+    }
+
+    const vat = buildVatGroups(lastAdeRecords, basis, includePrevYear);
+
+    // KPI (stesso perimetro della tabella)
+    if (elImp) elImp.textContent = "€ " + formatNumberITDisplay(vat.grandImp);
+    if (elIva) elIva.textContent = "€ " + formatNumberITDisplay(vat.grandIva);
+    if (elDoc) elDoc.textContent = "€ " + formatNumberITDisplay(vat.grandTot);
+
+    if (!vat.keys.length) {
+      const msg = "Nessun record nel perimetro selezionato.";
+      tbody.innerHTML = `<tr><td colspan='5' style='text-align:center; padding:20px;'>${msg}</td></tr>`;
+      return;
+    }
+
+    vat.keys.forEach(key => {
+      const g = vat.groups[key];
       const tr = document.createElement("tr");
 
-      // Cella Mese
-      const tdMese = document.createElement("td");
-      tdMese.textContent = g.label;
-      tr.appendChild(tdMese);
+      const tdP = document.createElement("td");
+      tdP.textContent = g.label || monthLabelFromKey(key);
 
-      // Cella Conteggio
-      const tdCount = document.createElement("td");
-      tdCount.className = "mono";
-      tdCount.textContent = g.count;
-      tr.appendChild(tdCount);
+      const tdN = document.createElement("td");
+      tdN.textContent = String(g.count || 0);
 
-      // Helper per celle numeriche
-      const addNumCell = (val) => {
-        const td = document.createElement("td");
-        td.className = "mono";
-        td.style.textAlign = "right";
-        td.textContent = formatNumberITDisplay(val); // Funzione esistente
-        tr.appendChild(td);
-      };
+      const tdImp = document.createElement("td");
+      tdImp.className = "num";
+      tdImp.textContent = formatNumberITDisplay(g.imp || 0);
 
-      addNumCell(g.imp);
-      addNumCell(g.iva);
-      addNumCell(g.tot);
+      const tdIva = document.createElement("td");
+      tdIva.className = "num";
+      tdIva.textContent = formatNumberITDisplay(g.iva || 0);
+
+      const tdTot = document.createElement("td");
+      tdTot.className = "num";
+      tdTot.textContent = formatNumberITDisplay(g.tot || 0);
+
+      tr.appendChild(tdP);
+      tr.appendChild(tdN);
+      tr.appendChild(tdImp);
+      tr.appendChild(tdIva);
+      tr.appendChild(tdTot);
 
       tbody.appendChild(tr);
     });
-
-    // Aggiorna totali in testa
-    if(elImp) elImp.textContent = "€ " + formatNumberITDisplay(grandImp);
-    if(elIva) elIva.textContent = "€ " + formatNumberITDisplay(grandIva);
-    if(elDoc) elDoc.textContent = "€ " + formatNumberITDisplay(grandTot);
-
-    // Attiva il ridimensionamento sulla tabella appena renderizzata
-    const tableEl = document.getElementById("vatTable");
-    if (tableEl) createResizableTable(tableEl);
-
-    console.log(`📊 VAT_DEBUG: IVA+ ${dbgPosIva} | IVA- ${dbgNegIva} | TD04 ${dbgTd04} | grandIva=${grandIva.toFixed(2)}`);
   }
 
   // Listener per aggiornare la tabella quando si clicca sul TAB
@@ -6055,57 +6140,42 @@ function renderPeriodKpi(results) {
         alert("Nessun dato da esportare.");
         return;
       }
-      
-      // Rigeneriamo i dati per l'export (simile al render)
-      const groups = {};
-      lastAdeRecords.forEach(r => {
-        let key = null;
-        if (r.data) {
-          key = monthKeyFromDate(r.data);
-        } else if (r.dataIso && r.dataIso.length >= 7) {
-          key = r.dataIso.slice(0, 7);
-        } else {
-          key = "SENZA_DATA";
-        }
 
-        const label = key === "SENZA_DATA" ? "(Senza data)" : monthLabelFromKey(key);
+      const lsBasisKey = "contaibl-vat-date-basis";
+      const lsPrevKey  = "contaibl-vat-include-prev-year";
 
-        if (!groups[key]) groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, label };
-        groups[key].count++;
-        groups[key].imp += (r.imp || 0);
-        groups[key].iva += (r.iva || 0);
-        groups[key].tot += (r.tot || 0);
+      let basis = (localStorage.getItem(lsBasisKey) || "RICEZIONE").toUpperCase();
+      const selBasis = document.getElementById("vatDateBasis");
+      if (selBasis) basis = String(selBasis.value || basis).toUpperCase();
+
+      let includePrevYear = localStorage.getItem(lsPrevKey) === "true";
+      const cb = document.getElementById("vatIncludePrevYear");
+      if (cb) includePrevYear = cb.checked;
+
+      const vat = buildVatGroups(lastAdeRecords, basis, includePrevYear);
+
+      if (!vat.keys.length) {
+        alert("Nessun record nel perimetro selezionato.");
+        return;
+      }
+
+      // CSV
+      let csv = "Periodo (Mese);N. Fatture;Imponibile;IVA;Totale Fattura\n";
+      vat.keys.forEach(key => {
+        const g = vat.groups[key];
+        csv += `${monthLabelFromKey(key)};${g.count};${formatNumberITDisplay(g.imp)};${formatNumberITDisplay(g.iva)};${formatNumberITDisplay(g.tot)}\n`;
       });
 
-      const keys = Object.keys(groups).sort((a, b) => {
-        if (a === "SENZA_DATA") return 1;
-        if (b === "SENZA_DATA") return -1;
-        return a.localeCompare(b);
-      });
-      const rows = ["Periodo;Numero Fatture;Imponibile;IVA;Totale"];
-      
-      keys.forEach(k => {
-        const g = groups[k];
-        const label = g.label;
-        const line = [
-          `"${label}"`,
-          g.count,
-          formatNumberForExcel(g.imp),
-          formatNumberForExcel(g.iva),
-          formatNumberForExcel(g.tot)
-        ].join(";");
-        rows.push(line);
-      });
-
-      const csvContent = "\uFEFF" + rows.join("\r\n");
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `riepilogo_iva_ade_${new Date().toISOString().slice(0,10)}.csv`;
+      const yearSuffix = vat.targetYear ? String(vat.targetYear) : "export";
+      a.download = `liquidazione_iva_${yearSuffix}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
   }
 

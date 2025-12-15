@@ -513,6 +513,22 @@
               <div>
                 <div class="table-title">Dettaglio Mensile</div>
               </div>
+              <div class="vat-controls" style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+                <label style="display:flex; gap:8px; align-items:center; font-size:0.85rem;">
+                  Data per IVA:
+                  <select id="vatDateBasis">
+                    <option value="RICEZIONE">Data ricezione</option>
+                    <option value="EMISSIONE">Data emissione</option>
+                    <option value="AUTO">Auto (ricezione→emissione)</option>
+                  </select>
+                </label>
+
+                <label style="display:flex; gap:8px; align-items:center; font-size:0.85rem;">
+                  <input type="checkbox" id="vatIncludePrevYear" />
+                  Includi anche anno precedente
+                </label>
+              </div>
+
               <button id="btnExportVat" class="btn btn-tertiary btn-icon-only" title="Esporta prospetto IVA">
                  📥 Esporta CSV
               </button>
