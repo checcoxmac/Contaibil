@@ -121,6 +121,10 @@
                 <label for="fileA">Seleziona il file ADE (CSV o XLSX)</label>
                   <input id="fileA" type="file"
                     accept=".csv,.xlsx,.xml,text/csv,text/xml,application/xml,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <div class="file-hint">💡 <strong>Multi-file:</strong> oppure seleziona una cartella con più export (mesi/trimestri)</div>
+                <label for="folderA">Seleziona cartella ADE (tutti i file saranno uniti)</label>
+                  <input id="folderA" type="file" webkitdirectory multiple
+                    accept=".csv,.xlsx,.xml" />
               </div>
             </div>
 
@@ -139,6 +143,10 @@
                 <label for="fileB">Seleziona file fatture acquisto</label>
                   <input id="fileB" type="file"
                     accept=".csv,.xlsx,.xml,text/csv,text/xml,application/xml,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <div class="file-hint">💡 <strong>Multi-file:</strong> oppure seleziona una cartella con più export (mesi/trimestri)</div>
+                <label for="folderB">Seleziona cartella Gestionale (tutti i file saranno uniti)</label>
+                  <input id="folderB" type="file" webkitdirectory multiple
+                    accept=".csv,.xlsx,.xml" />
                 <button type="button" id="btnForceMapB" class="btn btn-tertiary btn-force-map" title="Forza la scelta delle colonne per questo file">
                   Forza mapping colonne
                 </button>
@@ -160,6 +168,10 @@
                 <label for="fileC">Seleziona file note credito (se disponibile)</label>
                   <input id="fileC" type="file"
                     accept=".csv,.xlsx,.xml,text/csv,text/xml,application/xml,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <div class="file-hint">💡 <strong>Multi-file:</strong> oppure seleziona una cartella con più export (mesi/trimestri)</div>
+                <label for="folderC">Seleziona cartella Note Credito (tutti i file saranno uniti)</label>
+                  <input id="folderC" type="file" webkitdirectory multiple
+                    accept=".csv,.xlsx,.xml" />
                 <button type="button" id="btnForceMapC" class="btn btn-tertiary btn-force-map" title="Forza la scelta delle colonne per questo file">
                   Forza mapping colonne
                 </button>
@@ -392,14 +404,14 @@
               </div>
  
               <div class="table-wrapper" id="tableContainer" style="display:none;">
-                <table id="resultTable">
+                <table id="resultTable" class="excel-table sticky-header">
                   <thead>
-                    <tr>
+                    <tr class="thead-group">
                       <th colspan="7" style="text-align:center; background:var(--sys-bg-content-alt); border-bottom:1px solid var(--sys-separator);">Dati ADE</th>
                       <th colspan="6" style="text-align:center; background:var(--sys-bg-content); border-bottom:1px solid var(--sys-separator);">Dati Gestionale</th>
                       <th colspan="3" style="text-align:center; background:var(--sys-bg-content-alt); border-bottom:1px solid var(--sys-separator);">Esito</th>
                     </tr>
-                    <tr>
+                    <tr class="thead-cols">
                       <th style="width: 110px;">Num</th>
                       <th style="width: 280px;">Denominazione</th>
                       <th style="width: 120px;">P.IVA</th>
@@ -432,28 +444,282 @@
         </div>
       </div>
 
-      <!-- SEZIONE 1B: RICONCILIAZIONE VENDITE (BETA) -->
+      <!-- SEZIONE 1B: RICONCILIAZIONE VENDITE -->
       <div class="section" id="section-sales">
-        <div class="placeholder-wrapper">
-          <div class="placeholder-card">
-            <div class="placeholder-tag">
-              <span>🚧</span>
-              In sviluppo - Beta
+        <div class="main">
+          <!-- SIDE COLUMN: FILE INPUTS (VENDITE) -->
+          <div class="col-side">
+            <!-- QUICK START GUIDE (VENDITE) -->
+            <details class="card quickstart-card" open>
+              <summary class="card-header quickstart-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">🚀</span>
+                    Guida rapida - Vendite
+                  </div>
+                </div>
+              </summary>
+              <div class="quickstart-body">
+                <ol class="quickstart-list">
+                  <li><strong>Carica i file vendite</strong> — ADE Vendite (A) e Gestionale (B)</li>
+                  <li><strong>Verifica il mapping</strong> — Conferma colonne Cliente, Numero, Data, Importi</li>
+                  <li><strong>Confronta fatture vendite</strong> — Clicca il bottone per matchare</li>
+                  <li><strong>Rivedi i risultati</strong> — Controlla MATCH_OK e MATCH_FIX</li>
+                  <li><strong>Esporta</strong> — Scarica CSV riconciliato vendite</li>
+                </ol>
+                <div class="quickstart-tip">💡 <strong>Tip:</strong> Supporta cartelle multi-file (mesi/trimestri) come Acquisti</div>
+              </div>
+            </details>
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">📁</span>
+                    File A · ADE Vendite
+                  </div>
+                  <div class="card-subtitle">CSV/XLSX export fatture vendita da portale ADE</div>
+                </div>
+                <div class="badge-soft">Obbligatorio</div>
+              </div>
+              <div class="file-block">
+                <label for="salesFileAde">Seleziona il file ADE Vendite (CSV o XLSX)</label>
+                <input id="salesFileAde" type="file"
+                  accept=".csv,.xlsx,.xml,text/csv,text/xml,application/xml,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <div class="file-hint">💡 <strong>Multi-file:</strong> oppure seleziona una cartella con più export (mesi/trimestri)</div>
+                <label for="salesFolderAde">Seleziona cartella ADE Vendite (tutti i file saranno uniti)</label>
+                <input id="salesFolderAde" type="file" webkitdirectory multiple accept=".csv,.xlsx,.xml" />
+              </div>
             </div>
-            <div class="placeholder-title">Riconciliazione Vendite</div>
-            <div class="placeholder-subtitle">
-              Funzionalità in fase di implementazione. Permette di riconciliare le fatture di vendita tra ADE e gestionale.
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">🏷️</span>
+                    File B · Gestionale Vendite
+                  </div>
+                  <div class="card-subtitle">CSV/XLSX fatture vendita (Contel / Mexal)</div>
+                </div>
+                <div class="badge-soft">Obbligatorio</div>
+              </div>
+              <div class="file-block">
+                <label for="salesFileGest">Seleziona file fatture vendita</label>
+                <input id="salesFileGest" type="file"
+                  accept=".csv,.xlsx,.xml,text/csv,text/xml,application/xml,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <div class="file-hint">💡 <strong>Multi-file:</strong> oppure seleziona una cartella con più export (mesi/trimestri)</div>
+                <label for="salesFolderGest">Seleziona cartella Gestionale (tutti i file saranno uniti)</label>
+                <input id="salesFolderGest" type="file" webkitdirectory multiple accept=".csv,.xlsx,.xml" />
+                <button type="button" id="btnSalesForceMapB" class="btn btn-tertiary btn-force-map" title="Forza la scelta delle colonne per questo file">
+                  Forza mapping colonne
+                </button>
+              </div>
             </div>
-            <div class="placeholder-list">
-              <li>File A: Fatture elettroniche vendita da Sistema di Interscambio (SDI)</li>
-              <li>File B: Fatture vendita da gestionale</li>
-              <li>File C: Note di credito vendita (opzionale)</li>
-              <li>Stesso algoritmo di matching della riconciliazione acquisti</li>
-              <li>Export riconciliazione + liquidazione IVA vendite</li>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">↩️</span>
+                    File C · Note Credito Vendite
+                  </div>
+                  <div class="card-subtitle">CSV/XLSX note di credito vendita da gestionale</div>
+                </div>
+                <div class="badge-soft">Opzionale</div>
+              </div>
+              <div class="file-block">
+                <label for="salesFileNc">Seleziona file note credito (se disponibile)</label>
+                <input id="salesFileNc" type="file"
+                  accept=".csv,.xlsx,.xml,text/csv,text/xml,application/xml,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <div class="file-hint">💡 <strong>Multi-file:</strong> oppure seleziona una cartella con più export (mesi/trimestri)</div>
+                <label for="salesFolderNc">Seleziona cartella Note Credito (tutti i file saranno uniti)</label>
+                <input id="salesFolderNc" type="file" webkitdirectory multiple accept=".csv,.xlsx,.xml" />
+                <button type="button" id="btnSalesForceMapC" class="btn btn-tertiary btn-force-map" title="Forza la scelta delle colonne per questo file">
+                  Forza mapping colonne
+                </button>
+              </div>
             </div>
-            <div style="margin-top: 16px; padding: 12px; background: rgba(0,122,255,0.1); border-left: 3px solid var(--sys-tint-blue); border-radius: 8px; font-size: 0.85rem;">
-              <strong>💡 Nota tecnica:</strong> L'implementazione completa richiede un refactoring del codice esistente per supportare workspaces multipli. 
-              Per ora, puoi utilizzare la riconciliazione acquisti come riferimento.
+          </div>
+
+          <!-- MAIN COLUMN: ACTIONS + TABLE (VENDITE) -->
+          <div class="col-main">
+            <div class="card">
+              <div class="flow-stepper" id="flowStepperSales">
+                <div class="flow-step disabled" data-step="1">
+                  <div class="flow-step-circle">1</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Carica file vendite</div>
+                    <div class="flow-step-desc">ADE Vendite (A) + Gestionale (B)</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="2">
+                  <div class="flow-step-circle">2</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Verifica mapping</div>
+                    <div class="flow-step-desc">Conferma colonne Cliente</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="3">
+                  <div class="flow-step-circle">3</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Confronta vendite</div>
+                    <div class="flow-step-desc">Match automatico</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="4">
+                  <div class="flow-step-circle">4</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Rivedi risultati</div>
+                    <div class="flow-step-desc">Verifica match</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="5">
+                  <div class="flow-step-circle">5</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Esporta</div>
+                    <div class="flow-step-desc">CSV vendite</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="actions-row">
+                <div class="actions-left">
+                  <button id="btnSalesMatch" class="btn btn-primary">
+                    <span class="btn-icon">⚙️</span>
+                    Confronta fatture vendite
+                  </button>
+                </div>
+                <div class="actions-right">
+                  <span id="salesStatusText" class="status-text">Nessun confronto eseguito.</span>
+                </div>
+              </div>
+
+              <div class="summary" id="salesSummaryRow" style="display:none;">
+                <div class="chip">
+                  <span class="chip-dot dot-green"></span>
+                  Match OK: <span id="salesCntOk">0</span>
+                </div>
+                <div class="chip">
+                  <span class="chip-dot dot-yellow"></span>
+                  Match da correggere: <span id="salesCntFix">0</span>
+                </div>
+                <div class="chip">
+                  <span class="chip-dot dot-red"></span>
+                  Solo ADE: <span id="salesCntAde">0</span>
+                </div>
+                <div class="chip">
+                  <span class="chip-dot dot-blue"></span>
+                  Solo Gestionale: <span id="salesCntGest">0</span>
+                </div>
+              </div>
+
+              <div class="table-toolbar" id="salesTableToolbar" style="display:none;">
+                <!-- Export buttons -->
+                <div class="toolbar-section export-section">
+                  <div class="export-label">Esportazioni:</div>
+                  <button id="btnSalesExportVisible" class="btn btn-secondary btn-highlight" disabled title="Esporta solo le righe attualmente visibili in tabella (filtrate)">
+                    <span class="btn-icon">👁️</span>
+                    VISTA ATTUALE (0)
+                  </button>
+                  <div class="vr-separator"></div>
+                  <button id="btnSalesExportAll" class="btn btn-tertiary" disabled>Tutti</button>
+                  <button id="btnSalesExportAde" class="btn btn-tertiary" disabled>Solo ADE</button>
+                  <button id="btnSalesExportGest" class="btn btn-tertiary" disabled>Solo Gest</button>
+                  <button id="btnSalesExportFix" class="btn btn-tertiary" disabled>Solo Fix</button>
+                </div>
+
+                <!-- Filtri stato -->
+                <div class="toolbar-section filter-section">
+                  <div class="filter-row" id="salesFilterRow">
+                    <button class="filter-btn active" id="salesFilterAll" data-filter="ALL">Tutti</button>
+                    <button class="filter-btn" id="salesFilterOk" data-filter="MATCH_OK">Match OK</button>
+                    <button class="filter-btn" id="salesFilterFix" data-filter="MATCH_FIX">Da correggere</button>
+                    <button class="filter-btn" id="salesFilterOnlyAde" data-filter="SOLO_ADE">Solo ADE</button>
+                    <button class="filter-btn" id="salesFilterOnlyGest" data-filter="SOLO_GEST">Solo Gestionale</button>
+                  </div>
+                </div>
+
+                <!-- Filtri avanzati -->
+                <div class="toolbar-section advanced-filter-section">
+                  <div class="advanced-filter-row" id="salesAdvancedFilterRow">
+                    <div style="font-size:12px; opacity:0.8;">Filtri aggiuntivi:</div>
+
+                    <!-- Filtro mese ADE -->
+                    <div>
+                      <label for="salesMonthFilter" style="font-size:12px; opacity:0.8; display:block;">Mese (data ADE)</label>
+                      <select id="salesMonthFilter" style="min-width: 200px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:var(--sys-bg-shell); color:var(--sys-text-primary);">
+                        <option value="">Tutti i mesi ADE</option>
+                      </select>
+                    </div>
+
+                    <!-- Filtro cliente -->
+                    <div>
+                      <label for="salesPartyFilter" style="font-size:12px; opacity:0.8; display:block;">Cliente (denominazione o P.IVA)</label>
+                      <input id="salesPartyFilter"
+                            type="text"
+                            placeholder="Es. ROSSI SRL, 1337820152..."
+                            style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:var(--sys-bg-shell); color:var(--sys-text-primary);">
+                    </div>
+
+                    <!-- Filtro numero fattura -->
+                    <div>
+                      <label for="salesNumFilter" style="font-size:12px; opacity:0.8; display:block;">Numero fattura (ADE o Gestionale)</label>
+                      <input id="salesNumFilter"
+                            type="text"
+                            placeholder="Es. 921933, 73/2025, 001234..."
+                            style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:var(--sys-bg-shell); color:var(--sys-text-primary);">
+                    </div>
+
+                    <!-- Pulsante per azzerare i filtri -->
+                    <button type="button"
+                            id="btnSalesClearFilters"
+                            class="btn btn-tertiary"
+                            style="font-size:12px; padding:4px 10px; margin-top:16px;">
+                      ⟳ Pulisci filtri
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="table-card">
+              <div class="table-header">
+                <div>
+                  <div class="table-title">Risultato riconciliazione vendite</div>
+                  <div class="table-subtitle">Vista combinata ADE Vendite / Gestionale</div>
+                </div>
+              </div>
+
+              <div class="table-wrapper" id="salesTableContainer" style="display:none;">
+                <table id="salesResultTable" class="excel-table sticky-header">
+                  <thead>
+                    <tr class="thead-group">
+                      <th colspan="7" style="text-align:center; background:var(--sys-bg-content-alt); border-bottom:1px solid var(--sys-separator);">Dati ADE</th>
+                      <th colspan="6" style="text-align:center; background:var(--sys-bg-content); border-bottom:1px solid var(--sys-separator);">Dati Gestionale</th>
+                      <th colspan="2" style="text-align:center; background:var(--sys-bg-content-alt); border-bottom:1px solid var(--sys-separator);">Esito</th>
+                    </tr>
+                    <tr class="thead-cols">
+                      <th style="width: 110px;">Num</th>
+                      <th style="width: 280px;">Cliente</th>
+                      <th style="width: 120px;">P.IVA</th>
+                      <th style="width: 100px;">Data</th>
+                      <th style="width: 100px; text-align:right;">Imp.</th>
+                      <th style="width: 80px; text-align:right;">Iva</th>
+                      <th style="width: 100px; text-align:right;">Totale</th>
+
+                      <th style="width: 110px;">Num</th>
+                      <th style="width: 280px;">Cliente</th>
+                      <th style="width: 100px;">Data</th>
+                      <th style="width: 100px; text-align:right;">Imp.</th>
+                      <th style="width: 80px; text-align:right;">Iva</th>
+                      <th style="width: 100px; text-align:right;">Totale</th>
+
+                      <th style="width: 140px;">Stato</th>
+                      <th style="width: 200px;">Criterio</th>
+                    </tr>
+                  </thead>
+                  <tbody id="salesResultsTbody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -584,13 +850,80 @@
       <div class="section" id="section-vat">
         <div class="analysis-wrapper">
           <div class="analysis-header">
-            <div class="analysis-title">Riepilogo IVA (Dati ADE)</div>
+            <div class="analysis-title">Liquidazione IVA Mensile</div>
             <div class="analysis-subtitle">
-              Raggruppamento mensile imponibile e imposta basato sulla Data Fattura ADE.
+              Calcolo IVA a credito (acquisti) e IVA a debito (vendite) con saldo mensile.
             </div>
           </div>
 
-          <div class="kpi-container">
+          <!-- Processo guidato step-by-step -->
+          <div class="vat-process-guide">
+            <div class="vat-step">
+              <div class="vat-step-number">1</div>
+              <div class="vat-step-content">
+                <strong>Carica ADE Acquisti</strong>
+                <span class="vat-step-status" id="vatStepAcq">⏳ Attendere</span>
+              </div>
+            </div>
+            <div class="vat-step">
+              <div class="vat-step-number">2</div>
+              <div class="vat-step-content">
+                <strong>Carica ADE Vendite</strong> (opzionale per liquidazione completa)
+                <span class="vat-step-status" id="vatStepVen">⏳ Attendere</span>
+              </div>
+            </div>
+            <div class="vat-step">
+              <div class="vat-step-number">3</div>
+              <div class="vat-step-content">
+                <strong>Scegli regola data IVA</strong>
+                <span class="vat-step-status" id="vatStepDate">⚙️ Configurabile sotto</span>
+              </div>
+            </div>
+            <div class="vat-step">
+              <div class="vat-step-number">4</div>
+              <div class="vat-step-content">
+                <strong>Verifica mesi con warning</strong>
+                <span class="vat-step-status" id="vatStepWarn">📊 Automatico</span>
+              </div>
+            </div>
+            <div class="vat-step">
+              <div class="vat-step-number">5</div>
+              <div class="vat-step-content">
+                <strong>Esporta prospetto</strong>
+                <span class="vat-step-status" id="vatStepExp">📥 Pronto</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Toggle modalità -->
+          <div class="vat-mode-toggle">
+            <label>
+              <input type="radio" name="vatMode" value="acquisti" checked id="vatModeAcquisti" />
+              <span>Solo ADE Acquisti (IVA a credito)</span>
+            </label>
+            <label>
+              <input type="radio" name="vatMode" value="completa" id="vatModeCompleta" />
+              <span>Liquidazione completa (Acquisti + Vendite)</span>
+            </label>
+          </div>
+
+          <div class="kpi-container" id="vatKpiContainer">
+              <div class="kpi-box">
+                  <div class="kpi-label">IVA a Credito (Acquisti)</div>
+                  <div class="kpi-value" id="vatCredito">€ 0,00</div>
+              </div>
+              <div class="kpi-box" style="border-color: #ef4444;">
+                  <div class="kpi-label">IVA a Debito (Vendite)</div>
+                  <div class="kpi-value" id="vatDebito">€ 0,00</div>
+              </div>
+              <div class="kpi-box" style="border-color: #10b981;">
+                  <div class="kpi-label">Saldo IVA Mensile</div>
+                  <div class="kpi-value" id="vatSaldo">€ 0,00</div>
+              </div>
+          </div>
+
+          <!-- KPI vecchi (solo acquisti) - nascosti in modalità completa -->
+          <div class="kpi-container" id="vatKpiContainerOld" style="display:none;">
               <div class="kpi-box">
                   <div class="kpi-label">Totale Imponibile</div>
                   <div class="kpi-value" id="vatTotImp">€ 0,00</div>
@@ -624,6 +957,22 @@
                   <input type="checkbox" id="vatIncludePrevYear" />
                   Includi anche anno precedente
                 </label>
+                
+                <label style="display:flex; gap:8px; align-items:center; font-size:0.85rem;">
+                  <input type="checkbox" id="chkShowClosedMonths" checked />
+                  Mostra mesi chiusi
+                </label>
+              </div>
+
+              <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+                <label style="display:flex; gap:8px; align-items:center; font-size:0.85rem;">
+                  Riporto iniziale (credito - / debito +):
+                  <input type="number" id="vatOpeningBalance" step="0.01" value="0" style="width:120px; padding:6px 8px; border-radius:8px; border:1px solid rgba(120,144,180,0.35); background:rgba(255,255,255,0.03); color:inherit;" />
+                </label>
+                
+                <button id="btnVatResetPayments" class="btn btn-tertiary" title="Azzera tutti i versamenti F24">
+                  🔄 Reset versamenti
+                </button>
               </div>
 
               <button id="btnExportVat" class="btn btn-tertiary btn-icon-only" title="Esporta prospetto IVA">
@@ -633,13 +982,28 @@
 
             <div class="table-wrapper" style="display:block;">
               <table id="vatTable">
-                <thead>
-                  <tr>
+                <thead id="vatTableHead">
+                  <!-- Header per modalità "Solo Acquisti" (default) -->
+                  <tr id="vatHeaderAcquisti">
                     <th style="width: 150px;">Periodo (Mese)<div class="resizer"></div></th>
                     <th style="width: 100px;">N. Fatture<div class="resizer"></div></th>
                     <th style="text-align:right; width: 150px;">Imponibile<div class="resizer"></div></th>
                     <th style="text-align:right; width: 150px;">IVA<div class="resizer"></div></th>
                     <th style="text-align:right; width: 150px;">Totale Fattura<div class="resizer"></div></th>
+                  </tr>
+                  <!-- Header per modalità "Completa" (nascosto di default) -->
+                  <tr id="vatHeaderCompleta" style="display:none;">
+                    <th style="width: 150px;">Periodo (Mese)<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">IVA Credito (Acq)<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">IVA Debito (Ven)<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">Saldo IVA<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">Riporto da prec.<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">Posizione prima F24<div class="resizer"></div></th>
+                    <th style="text-align:center; width: 140px;">F24 versato<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">Residuo<div class="resizer"></div></th>
+                    <th style="text-align:center; width: 100px;">Chiusa<div class="resizer"></div></th>
+                    <th style="text-align:center; width: 100px;">N. Doc Acq<div class="resizer"></div></th>
+                    <th style="text-align:center; width: 100px;">N. Doc Ven<div class="resizer"></div></th>
                   </tr>
                 </thead>
                 <tbody id="vatTbody">

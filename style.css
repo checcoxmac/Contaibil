@@ -374,6 +374,7 @@ body {
 
 .section.active {
   display: flex;
+  flex-direction: column;
 }
 
 /* MAIN LAYOUT sezione Riconciliazione */
@@ -2483,12 +2484,36 @@ table.excel-view thead th {
 
 /* Contenitore che permette lo scroll orizzontale SENZA schiacciare le colonne */
 .table-wrapper {
-    width: 100%;
-    overflow-x: auto; /* Scroll orizzontale se serve */
-    background: var(--sys-bg-content);
-    border: 1px solid var(--sys-separator);
-    border-radius: 6px;
-    margin-top: 10px;
+  width: 100%;
+  overflow: auto; /* Scroll sia verticale che orizzontale se serve */
+  background: var(--sys-bg-content);
+  border: 1px solid var(--sys-separator);
+  border-radius: 6px;
+  margin-top: 10px;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 420px;
+  height: calc(100vh - 320px); /* Regolabile per allungare la tabella */
+}
+
+/* Sezioni principali: colonna e altezza viewport */
+#section-recon, #section-sales {
+  /* NON mettere display qui - lo gestisce .section.active */
+  flex-direction: column;
+  min-height: calc(100vh - 110px);
+}
+
+/* Il blocco risultati deve poter crescere */
+.table-card, .results-panel {
+  flex: 1 1 auto;
+  min-height: 0; /* fondamentale per consentire lo scroll interno */
+}
+
+/* Schermi grandi: più spazio verticale alla tabella */
+@media (min-height: 900px) {
+  .table-wrapper {
+    height: calc(100vh - 280px);
+  }
 }
 
 /* La tabella NON deve essere al 100% fisso se le colonne sono tante */
@@ -2520,6 +2545,28 @@ th {
     position: relative; /* Per il resizer */
     user-select: none;
     border-bottom: 2px solid var(--sys-separator); /* Bordo sotto header più spesso */
+}
+
+/* Sticky header robusto: applica sticky sui TH */
+.excel-table thead tr.thead-group th {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: rgba(8,12,20,0.98);
+  border-bottom: 1px solid rgba(120,144,180,0.35);
+}
+
+.excel-table thead tr.thead-cols th {
+  position: sticky;
+  top: var(--thead-cols-top, 38px);
+  z-index: 55;
+  background: rgba(6,10,18,0.98);
+  border-bottom: 1px solid rgba(120,144,180,0.25);
+}
+
+/* Evita che contenitori spezzino lo sticky */
+.table-card {
+  overflow: visible;
 }
 
 /* Corpo tabella: Colore di sfondo scuro leggibile */
@@ -2567,4 +2614,196 @@ tbody tr:not([class*="status-"]):hover td {
 .table-resizing {
     cursor: col-resize;
     user-select: none;
+}
+
+/* ============================================================
+   📁 FILE HINT per import multi-file (Dic 2025)
+   ============================================================ */
+.file-hint {
+    margin: 8px 0;
+    padding: 8px 12px;
+    background: var(--pill-fix-bg);
+    border-left: 3px solid var(--pill-fix-fg);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--sys-text-secondary);
+    line-height: 1.4;
+}
+
+/* ============================================================
+   📊 LIQUIDAZIONE IVA - Processo guidato (Dic 2025)
+   ============================================================ */
+.vat-process-guide {
+    margin: 20px 0;
+    padding: 16px;
+    background: var(--sys-bg-elevated);
+    border: 1px solid var(--sys-separator);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.vat-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    background: var(--sys-bg-content-alt);
+    border-radius: 8px;
+}
+
+.vat-step-number {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--sys-tint-blue);
+    color: white;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+.vat-step-content {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+.vat-step-content strong {
+    color: var(--sys-text-primary);
+}
+
+.vat-step-status {
+    font-size: 0.85rem;
+    color: var(--sys-text-secondary);
+    padding: 4px 10px;
+    background: rgba(0,0,0,0.05);
+    border-radius: 12px;
+}
+
+.vat-mode-toggle {
+    margin: 16px 0;
+    padding: 12px;
+    background: var(--sys-bg-elevated);
+    border: 1px solid var(--sys-separator);
+    border-radius: var(--radius-lg);
+    display: flex;
+    gap: 20px;
+}
+
+.vat-mode-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: color 0.2s;
+}
+
+.vat-mode-toggle input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.vat-mode-toggle label:hover {
+    color: var(--sys-tint-blue);
+}
+
+.vat-warning-row {
+    background-color: rgba(255, 149, 0, 0.15) !important;
+    border-left: 3px solid var(--sys-tint-yellow);
+}
+
+.vat-warning-row:hover {
+    background-color: rgba(255, 149, 0, 0.25) !important;
+}
+
+.vat-f24-input {
+    width: 120px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(120,144,180,0.35);
+    background: rgba(255,255,255,0.03);
+    color: inherit;
+    text-align: right;
+    font-family: inherit;
+}
+
+.vat-f24-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+tr.vat-closed {
+    opacity: 0.65;
+}
+
+.badge-closed {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid rgba(34,197,94,0.35);
+    background: rgba(34,197,94,0.1);
+    color: #22c55e;
+}
+
+/* ===========================
+   Sticky header sempre visibile (Acquisti + Vendite)
+   =========================== */
+
+/* Il wrapper deve essere quello che scrolla */
+.table-wrapper {
+  overflow: auto;
+  position: relative;
+}
+
+/* 1a riga thead (raggruppamento) sticky */
+.table-wrapper table thead tr:first-child th {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: var(--sys-bg-content-alt);
+  border-bottom: 1px solid var(--sys-separator);
+}
+
+/* 2a riga thead (colonne) sticky sotto la prima riga */
+.table-wrapper table thead tr:nth-child(2) th {
+  position: sticky;
+  top: var(--thead-group-h, 34px);
+  z-index: 55;
+  background: var(--sys-bg-content-alt);
+  border-bottom: 2px solid var(--sys-separator);
+}
+
+/* piccolo shadow per "stacco" mentre scrolli */
+.table-wrapper table thead th {
+  box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+}
+
+/* ===========================
+   Tabella più alta: usa l'altezza disponibile
+   =========================== */
+
+/* La card che contiene la tabella deve poter crescere in altezza */
+.card.results-card,
+.card.sales-results-card,
+.card.table-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* fondamentale per i figli scrollabili */
+}
+
+/* Fallback per selector generico se non hai le classi specifiche */
+.card .table-wrapper {
+  flex: 1;
+  min-height: 420px;
+  max-height: calc(100vh - 240px);
 }

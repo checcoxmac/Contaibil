@@ -94,6 +94,22 @@ window.addEventListener("DOMContentLoaded", () => {
   let originalResults = null;
   let undoStack = [];
 
+  // VENDITE (Feature Dic 2025)
+  let lastAdeSalesRecords = [];
+  let lastGestSalesRecords = [];
+  let lastSalesResults = [];
+  let currentSalesFilter = "ALL";
+  let totalAdeSalesCount = 0;
+  let totalGestSalesCount = 0;
+  let salesMonthFilter = null;
+  let salesPartyFilter = "";
+  let salesNumFilter = "";
+  let pendingSalesMatchSourceId = null;
+  let pendingSalesMatchSourceSide = null;
+  let nextSalesResultId = 1;
+  let originalSalesResults = null;
+  let undoSalesStack = [];
+
   // Stato flusso guidato / stepper
   const flowState = {
     files: { ade: false, gest: false, nc: false },
@@ -106,7 +122,42 @@ window.addEventListener("DOMContentLoaded", () => {
     GEST_B: { confirmed: false, headerSig: null },
     GEST_C: { confirmed: false, headerSig: null }
   };
-  const cachedHeaders = { GEST_B: null, GEST_C: null };
+  const cachedHeaders = { GEST_B: null, GEST_C: null, GEST_SALES: null, GEST_SALES_NC: null };
+
+  // Flow state per VENDITE
+  const flowStateSales = {
+    files: { adeSales: false, gestSales: false },
+    mapping: { gestSalesConfirmed: false },
+    matchDone: false,
+    correctionsDone: false,
+    exportDone: false
+  };
+  const mappingSessionSales = {
+    GEST_SALES: { confirmed: false, headerSig: null },
+    GEST_SALES_NC: { confirmed: false, headerSig: null }
+  };
+  const cachedHeadersSales = { GEST_SALES: null };
+
+  // Calcola offset sticky per la seconda riga di header
+  // Funziona con selector tr:first-child e tr:nth-child(2)
+  function updateStickyHeaderOffsets() {
+    document.querySelectorAll(".table-wrapper table").forEach(table => {
+      const thead = table.querySelector("thead");
+      if (!thead) return;
+
+      const firstRow = thead.querySelector("tr:first-child");
+      if (!firstRow) return;
+
+      // Altezza reale della riga raggruppamento
+      const h = Math.ceil(firstRow.getBoundingClientRect().height || 34);
+
+      // Salvo su wrapper così vale solo per quella tabella
+      const wrapper = table.closest(".table-wrapper");
+      if (wrapper) wrapper.style.setProperty("--thead-group-h", `${h}px`);
+    });
+  }
+
+  window.addEventListener("resize", () => updateStickyHeaderOffsets());
 
   const DEFAULT_PROCEDURE_FILENAME = "procedure_STANDARD.json";
 
@@ -117,6 +168,64 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // editor
   let currentEditRowId = null;
+
+  // ---------- VAT State Storage ----------
+  const VAT_STATE_KEY = "contaibil_vatState_v2";
+
+  function loadVatState() {
+    try {
+      const stored = localStorage.getItem(VAT_STATE_KEY);
+      if (!stored) return { openingBalance: 0, months: {} };
+      return JSON.parse(stored);
+    } catch (e) {
+      console.warn("Error loading VAT state:", e);
+      return { openingBalance: 0, months: {} };
+    }
+  }
+
+  function saveVatState(state) {
+    try {
+      localStorage.setItem(VAT_STATE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.error("Error saving VAT state:", e);
+    }
+  }
+
+  function getMonthState(monthKey) {
+    const state = loadVatState();
+    return state.months[monthKey] || { f24Paid: 0, paid: false };
+  }
+
+  function setMonthF24Paid(monthKey, amount) {
+    const state = loadVatState();
+    if (!state.months[monthKey]) {
+      state.months[monthKey] = { f24Paid: 0, paid: false };
+    }
+    state.months[monthKey].f24Paid = amount;
+    saveVatState(state);
+  }
+
+  function setMonthPaid(monthKey, paid, paidAt = null) {
+    const state = loadVatState();
+    if (!state.months[monthKey]) {
+      state.months[monthKey] = { f24Paid: 0, paid: false };
+    }
+    state.months[monthKey].paid = paid;
+    if (paid && paidAt) {
+      state.months[monthKey].paidAt = paidAt;
+    }
+    saveVatState(state);
+  }
+
+  function setOpeningBalance(amount) {
+    const state = loadVatState();
+    state.openingBalance = amount;
+    saveVatState(state);
+  }
+
+  function resetVatState() {
+    localStorage.removeItem(VAT_STATE_KEY);
+  }
 
   // ---------- utils ----------
   // modules/ThemeManager.js
@@ -1176,30 +1285,331 @@ function formatDateForUI(dateObj) {
 
   function markMappingConfirmed(key, headers) {
     const k = key || "GEST_B";
-    if (!mappingSession[k]) mappingSession[k] = { confirmed: false, headerSig: null };
-    mappingSession[k].confirmed = true;
-    mappingSession[k].headerSig = headersSignature(headers);
-    flowState.mapping[k === "GEST_C" ? "gestCConfirmed" : "gestBConfirmed"] = true;
+    
+    // Gestisci sessioni separate per acquisti e vendite
+    if (k === "GEST_SALES" || k === "GEST_SALES_NC") {
+      if (!mappingSessionSales[k]) mappingSessionSales[k] = { confirmed: false, headerSig: null };
+      mappingSessionSales[k].confirmed = true;
+      mappingSessionSales[k].headerSig = headersSignature(headers);
+      flowStateSales.mapping.gestSalesConfirmed = true;
+    } else {
+      if (!mappingSession[k]) mappingSession[k] = { confirmed: false, headerSig: null };
+      mappingSession[k].confirmed = true;
+      mappingSession[k].headerSig = headersSignature(headers);
+      flowState.mapping[k === "GEST_C" ? "gestCConfirmed" : "gestBConfirmed"] = true;
+    }
   }
 
   function resetMappingConfirmation(key) {
     const k = key || "GEST_B";
-    if (!mappingSession[k]) mappingSession[k] = { confirmed: false, headerSig: null };
-    mappingSession[k].confirmed = false;
-    mappingSession[k].headerSig = null;
-    if (k === "GEST_C") {
-      flowState.mapping.gestCConfirmed = false;
+    
+    if (k === "GEST_SALES" || k === "GEST_SALES_NC") {
+      if (!mappingSessionSales[k]) mappingSessionSales[k] = { confirmed: false, headerSig: null };
+      mappingSessionSales[k].confirmed = false;
+      mappingSessionSales[k].headerSig = null;
+      flowStateSales.mapping.gestSalesConfirmed = false;
     } else {
-      flowState.mapping.gestBConfirmed = false;
+      if (!mappingSession[k]) mappingSession[k] = { confirmed: false, headerSig: null };
+      mappingSession[k].confirmed = false;
+      mappingSession[k].headerSig = null;
+      if (k === "GEST_C") {
+        flowState.mapping.gestCConfirmed = false;
+      } else {
+        flowState.mapping.gestBConfirmed = false;
+      }
     }
   }
 
   function isMappingConfirmed(key, headers) {
     const k = key || "GEST_B";
-    const info = mappingSession[k];
+    
+    const info = (k === "GEST_SALES" || k === "GEST_SALES_NC") ? mappingSessionSales[k] : mappingSession[k];
     if (!info || !info.confirmed) return false;
     if (!headers || !headers.length) return info.confirmed; // se non abbiamo header, fidati dello stato
     return info.headerSig === headersSignature(headers);
+  }
+
+  // ---------- AUTO-DETECTION COLONNE GESTIONALE ----------
+
+  /**
+   * Inferenza euristica colonne da headers
+   * @returns { cfg: {...}, score: number, reasons: string[] }
+   */
+  function inferColumnsFromHeaders(headers, mappingKey) {
+    const cfg = { num: "", data: "", imp: "", iva: "", tot: "", den: "", piva: "", dataReg: "" };
+    const reasons = [];
+    let score = 0;
+
+    // Normalizza headers per matching
+    const normalized = headers.map(h => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, ""));
+
+    // Euristica per ogni campo
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i];
+      const n = normalized[i];
+
+      // Numero documento
+      if (!cfg.num && (n.includes("numero") || n.includes("ndoc") || n.includes("doc") || n.includes("fattura") || n === "num")) {
+        cfg.num = h;
+        score += 2;
+      }
+
+      // Data documento
+      if (!cfg.data && (n.includes("data") && (n.includes("emissione") || n.includes("documento") || n.includes("doc") || n === "data"))) {
+        cfg.data = h;
+        score += 2;
+      }
+
+      // Imponibile
+      if (!cfg.imp && (n.includes("imponibile") || n.includes("importo") || n.includes("netto") || (n.includes("imp") && !n.includes("imposta")))) {
+        cfg.imp = h;
+        score += 1;
+      }
+
+      // IVA
+      if (!cfg.iva && (n.includes("iva") || n.includes("imposta"))) {
+        // Evita colonne che sembrano aliquote
+        if (!n.includes("aliquota") && !n.includes("perc") && !n.includes("%")) {
+          cfg.iva = h;
+          score += 1;
+        }
+      }
+
+      // Totale
+      if (!cfg.tot && (n.includes("totale") || n.includes("lordo") || n.includes("total"))) {
+        cfg.tot = h;
+        score += 2;
+      }
+
+      // Denominazione
+      if (!cfg.den && (n.includes("ragione") || n.includes("denominazione") || n.includes("cliente") || n.includes("fornitore") || n.includes("nome"))) {
+        cfg.den = h;
+        score += 1;
+      }
+
+      // P.IVA
+      if (!cfg.piva && (n.includes("piva") || n.includes("partitaiva") || n.includes("vat"))) {
+        cfg.piva = h;
+        score += 1;
+      }
+
+      // Data registrazione
+      if (!cfg.dataReg && n.includes("registrazione") && n.includes("data")) {
+        cfg.dataReg = h;
+        score += 1;
+      }
+    }
+
+    // Verifica campi minimi
+    if (!cfg.num) reasons.push("❌ Manca colonna Numero documento");
+    if (!cfg.data) reasons.push("❌ Manca colonna Data");
+    if (!cfg.tot && (!cfg.imp || !cfg.iva)) reasons.push("❌ Manca Totale oppure coppia Imponibile+IVA");
+
+    return { cfg, score, reasons };
+  }
+
+  /**
+   * Validazione configurazione colonne con controlli di coerenza
+   * @returns { ok: boolean, severity: "OK"|"WARN"|"BLOCK", reasons: string[] }
+   */
+  function validateColumnConfig(headers, cfg, sampleRows) {
+    const reasons = [];
+    let severity = "OK";
+
+    // 1. Verifica campi minimi
+    if (!cfg.num) {
+      reasons.push("🚫 Manca colonna Numero documento (campo obbligatorio)");
+      severity = "BLOCK";
+    }
+    if (!cfg.data) {
+      reasons.push("🚫 Manca colonna Data (campo obbligatorio)");
+      severity = "BLOCK";
+    }
+    if (!cfg.tot && (!cfg.imp || !cfg.iva)) {
+      reasons.push("🚫 Manca Totale oppure coppia Imponibile+IVA (campo obbligatorio)");
+      severity = "BLOCK";
+    }
+
+    if (severity === "BLOCK") {
+      return { ok: false, severity, reasons };
+    }
+
+    // 2. Validazione su campione (max 30 righe)
+    const sample = sampleRows.slice(0, 30);
+    if (sample.length === 0) {
+      return { ok: true, severity: "OK", reasons: ["Nessun campione disponibile per validazione"] };
+    }
+
+    const idxNum = headers.indexOf(cfg.num);
+    const idxData = headers.indexOf(cfg.data);
+    const idxImp = cfg.imp ? headers.indexOf(cfg.imp) : -1;
+    const idxIva = cfg.iva ? headers.indexOf(cfg.iva) : -1;
+    const idxTot = cfg.tot ? headers.indexOf(cfg.tot) : -1;
+
+    let nonNumericTot = 0;
+    let nonNumericImp = 0;
+    let nonNumericIva = 0;
+    let totLessThanImp = 0;
+    let invalidDates = 0;
+    let ivaSuspectAliquota = 0;
+
+    for (const row of sample) {
+      // Check totale numerico
+      if (idxTot >= 0) {
+        const val = parseFloat(String(row[idxTot] || "").replace(",", "."));
+        if (isNaN(val)) nonNumericTot++;
+      }
+
+      // Check imponibile numerico
+      if (idxImp >= 0) {
+        const val = parseFloat(String(row[idxImp] || "").replace(",", "."));
+        if (isNaN(val)) nonNumericImp++;
+      }
+
+      // Check IVA numerico e valori sospetti
+      if (idxIva >= 0) {
+        const val = parseFloat(String(row[idxIva] || "").replace(",", "."));
+        if (isNaN(val)) {
+          nonNumericIva++;
+        } else {
+          // Valori tipici di aliquota (4, 5, 10, 22) → sospetto
+          if (val === 4 || val === 5 || val === 10 || val === 22) {
+            ivaSuspectAliquota++;
+          }
+        }
+      }
+
+      // Check tot < imp
+      if (idxTot >= 0 && idxImp >= 0) {
+        const tot = parseFloat(String(row[idxTot] || "").replace(",", "."));
+        const imp = parseFloat(String(row[idxImp] || "").replace(",", "."));
+        if (!isNaN(tot) && !isNaN(imp) && tot < imp) {
+          totLessThanImp++;
+        }
+      }
+
+      // Check data parseabile
+      if (idxData >= 0) {
+        const dateStr = String(row[idxData] || "").trim();
+        if (dateStr && !parseDateFlexible(dateStr)) {
+          invalidDates++;
+        }
+      }
+    }
+
+    const sampleCount = sample.length;
+
+    // Soglie di warning
+    if (nonNumericTot > sampleCount * 0.3) {
+      reasons.push(`⚠️ ${Math.round(nonNumericTot / sampleCount * 100)}% dei Totali non sono numerici`);
+      severity = "WARN";
+    }
+    if (nonNumericImp > sampleCount * 0.3) {
+      reasons.push(`⚠️ ${Math.round(nonNumericImp / sampleCount * 100)}% degli Imponibili non sono numerici`);
+      severity = "WARN";
+    }
+    if (nonNumericIva > sampleCount * 0.3) {
+      reasons.push(`⚠️ ${Math.round(nonNumericIva / sampleCount * 100)}% delle IVA non sono numeriche`);
+      severity = "WARN";
+    }
+    if (ivaSuspectAliquota > sampleCount * 0.5) {
+      reasons.push(`⚠️ Colonna IVA contiene valori tipici di aliquota (4/5/10/22). Probabile colonna sbagliata.`);
+      severity = "WARN";
+    }
+    if (totLessThanImp > sampleCount * 0.3) {
+      reasons.push(`⚠️ In ${Math.round(totLessThanImp / sampleCount * 100)}% dei casi Totale < Imponibile (incoerenza)`);
+      severity = "WARN";
+    }
+    if (invalidDates > sampleCount * 0.3) {
+      reasons.push(`⚠️ ${Math.round(invalidDates / sampleCount * 100)}% delle date non sono parseabili`);
+      severity = "WARN";
+    }
+
+    const ok = (severity === "OK");
+    return { ok, severity, reasons };
+  }
+
+  /**
+   * Orchestratore: carica cfg da procedure o inferisce, valida, e chiede conferma se necessario
+   * @returns configurazione se OK, null se richiede modal
+   */
+  async function ensureMappingOrAsk(headers, rows, mappingKey, fileDescription) {
+    ensureLearningShape();
+
+    // 1. Prova a caricare cfg esistente
+    let cfg = getColumnConfig(mappingKey);
+    let fromCache = (cfg && (cfg.num || cfg.data || cfg.tot || cfg.imp));
+
+    if (fromCache) {
+      // Valida cfg esistente
+      const validation = validateColumnConfig(headers, cfg, rows);
+      
+      if (validation.severity === "OK") {
+        // Config esistente è OK
+        markMappingConfirmed(mappingKey, headers);
+        return cfg;
+      } else if (validation.severity === "WARN") {
+        // Warning: mostra messaggio ma procedi con conferma automatica
+        console.warn(`Mapping ${mappingKey} con warning:`, validation.reasons);
+        const helper = document.getElementById("gestMapHelper");
+        if (helper) {
+          helper.innerHTML = `⚠️ <strong>Warning mapping salvato:</strong><br>${validation.reasons.join("<br>")}`;
+        }
+        // Apri modal per conferma
+        const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
+        if (userCfg && (userCfg.num || userCfg.data)) {
+          updateColumnConfig(mappingKey, userCfg);
+          markMappingConfirmed(mappingKey, headers);
+          return userCfg;
+        }
+        return null;
+      } else {
+        // BLOCK: cfg esistente non valido
+        const helper = document.getElementById("gestMapHelper");
+        if (helper) {
+          helper.innerHTML = `🚫 <strong>Mapping salvato non valido:</strong><br>${validation.reasons.join("<br>")}`;
+        }
+        const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
+        if (userCfg && (userCfg.num || userCfg.data)) {
+          updateColumnConfig(mappingKey, userCfg);
+          markMappingConfirmed(mappingKey, headers);
+          return userCfg;
+        }
+        return null;
+      }
+    }
+
+    // 2. Nessuna config salvata → prova inferenza
+    const inferred = inferColumnsFromHeaders(headers, mappingKey);
+    const validation = validateColumnConfig(headers, inferred.cfg, rows);
+
+    if (validation.severity === "OK" && inferred.score >= 6) {
+      // Inferenza affidabile: salva e conferma automaticamente
+      console.log(`Auto-detected mapping for ${mappingKey}:`, inferred.cfg);
+      updateColumnConfig(mappingKey, inferred.cfg);
+      markMappingConfirmed(mappingKey, headers);
+      const helper = document.getElementById("gestMapHelper");
+      if (helper) {
+        helper.innerHTML = `✅ <strong>Mapping rilevato automaticamente</strong>`;
+      }
+      return inferred.cfg;
+    } else {
+      // Inferenza incompleta/inaffidabile: chiedi manualmente
+      const helper = document.getElementById("gestMapHelper");
+      if (helper) {
+        const allReasons = [...inferred.reasons, ...validation.reasons];
+        helper.innerHTML = `🔍 <strong>Mapping non rilevabile automaticamente:</strong><br>${allReasons.join("<br>")}<br><br>Seleziona manualmente le colonne corrette.`;
+      }
+      
+      // Pre-compila con l'inferenza parziale
+      const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
+      if (userCfg && (userCfg.num || userCfg.data)) {
+        updateColumnConfig(mappingKey, userCfg);
+        markMappingConfirmed(mappingKey, headers);
+        return userCfg;
+      }
+      return null;
+    }
   }
 
   // ---------- MAPPING MANUALE COLONNE GESTIONALE ----------
@@ -1270,6 +1680,16 @@ function formatDateForUI(dateObj) {
       fillSelectWithHeaders(selImp,  headers, cfg.imp);
       fillSelectWithHeaders(selIva,  headers, cfg.iva);
       fillSelectWithHeaders(selTot,  headers, cfg.tot);
+
+      // Preseleziona i valori dalle config
+      selNum.value = cfg.num ?? "";
+      selPiva.value = cfg.piva ?? "";
+      selDen.value = cfg.den ?? "";
+      selData.value = cfg.data ?? "";
+      if (selDataReg) selDataReg.value = cfg.dataReg ?? "";
+      selImp.value = cfg.imp ?? "";
+      selIva.value = cfg.iva ?? "";
+      selTot.value = cfg.tot ?? "";
 
       function closeModal() {
         backdrop.classList.add("hidden");
@@ -1766,6 +2186,162 @@ function formatDateForUI(dateObj) {
     }
 
     return file.text();
+  }
+
+  // ============================================================
+  // 📁 IMPORT CARTELLE MULTI-FILE (Feature Dic 2025)
+  // ============================================================
+  /**
+   * Legge più file (da FileList), li unisce e dedup per chiave stabile
+   * @param {FileList} fileList - Lista di file da cartella o selezione multipla
+   * @param {Function} parserFn - Funzione che prende (csv) e torna {headers, rows}
+   * @param {boolean} isADE - Se true, mantiene punti decimali (per ADE)
+   * @param {string} sourceLabel - Etichetta per log (es. "ADE Acquisti")
+   * @returns {Promise<{headers, rows, stats}>}
+   */
+  async function readFilesUnion(fileList, parserFn, isADE, sourceLabel) {
+    console.log(`📂 readFilesUnion: caricamento ${fileList.length} file per ${sourceLabel}`);
+    
+    // Ordina per nome file (per processare in ordine cronologico se nominati bene)
+    const files = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name));
+    
+    // Filtra estensioni consentite
+    const allowedExts = ['.csv', '.xlsx', '.xml'];
+    const validFiles = files.filter(f => {
+      const name = f.name.toLowerCase();
+      return allowedExts.some(ext => name.endsWith(ext));
+    });
+
+    if (validFiles.length === 0) {
+      throw new Error(`Nessun file valido trovato in ${sourceLabel}. Estensioni supportate: ${allowedExts.join(', ')}`);
+    }
+
+    console.log(`✅ File validi: ${validFiles.length} su ${files.length}`);
+
+    let allRows = [];
+    let masterHeaders = null;
+    const fileStats = [];
+
+    // Carica ogni file
+    for (const file of validFiles) {
+      try {
+        const csvText = await loadTableFromFile(file, isADE);
+        const parsed = parserFn(csvText);
+        
+        if (!masterHeaders) {
+          masterHeaders = parsed.headers;
+        } else {
+          // Verifica che gli header siano coerenti
+          const headersMatch = parsed.headers.length === masterHeaders.length &&
+            parsed.headers.every((h, i) => h.toLowerCase().trim() === masterHeaders[i].toLowerCase().trim());
+          
+          if (!headersMatch) {
+            console.warn(`⚠️ File "${file.name}": header diversi dal primo file, lo salto.`);
+            continue;
+          }
+        }
+
+        allRows = allRows.concat(parsed.rows);
+        fileStats.push({ name: file.name, rows: parsed.rows.length });
+        
+        console.log(`   ✓ ${file.name}: ${parsed.rows.length} righe`);
+      } catch (err) {
+        console.error(`❌ Errore lettura file "${file.name}":`, err);
+        throw new Error(`Errore durante la lettura di "${file.name}": ${err.message}`);
+      }
+    }
+
+    console.log(`📊 Totale righe caricate: ${allRows.length}`);
+
+    // ============================================================
+    // DEDUP: usa chiave stabile per eliminare duplicati
+    // ============================================================
+    const makeKey = (row) => {
+      // Normalizza numero fattura
+      const numRaw = row['Numero fattura / documento'] || 
+                     row['Numero Fattura'] || 
+                     row['Numero'] || 
+                     row['numero fattura'] ||
+                     row['numero'] ||
+                     row['Numero documento'] ||
+                     '';
+      const numNorm = onlyDigits(numRaw);
+
+      // P.IVA
+      const pivaRaw = row['Partita IVA fornitore'] ||
+                      row['Partita IVA cedente / prestatore'] ||
+                      row['P.IVA'] ||
+                      row['PIVA'] ||
+                      row['Partita IVA cliente'] ||
+                      row['piva'] ||
+                      '';
+      const pivaNorm = onlyDigits(pivaRaw);
+
+      // Data (prova vari formati)
+      const dataRaw = row['Data emissione'] ||
+                      row['Data ricezione'] ||
+                      row['Data fattura'] ||
+                      row['Data Fattura'] ||
+                      row['Data'] ||
+                      row['data'] ||
+                      '';
+      const dataISO = normalizeDate(dataRaw) || '';
+
+      // Totale (prova vari formati)
+      const totRaw = row['Totale'] ||
+                     row['Totale fattura'] ||
+                     row['TOTALE DOCUMENTO'] ||
+                     row['totale'] ||
+                     row['Importo'] ||
+                     '';
+      const totNum = parseNumberIT(totRaw);
+      const tot2dec = isNaN(totNum) ? '0.00' : totNum.toFixed(2);
+
+      // Denominazione (fallback se manca P.IVA)
+      const denRaw = row['Denominazione fornitore'] ||
+                     row['Denominazione cedente / prestatore'] ||
+                     row['Denominazione cliente'] ||
+                     row['Ragione Sociale'] ||
+                     row['denominazione'] ||
+                     '';
+      const denNorm = normalizeName(denRaw);
+
+      // Chiave primaria: num + piva + data + tot
+      let key = `${numNorm}|${pivaNorm}|${dataISO}|${tot2dec}`;
+      
+      // Se num o piva mancano, usa denominazione
+      if (!numNorm || !pivaNorm) {
+        key = `${denNorm}|${dataISO}|${tot2dec}`;
+      }
+
+      return key;
+    };
+
+    const uniqueMap = new Map();
+    allRows.forEach(row => {
+      const key = makeKey(row);
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, row);
+      }
+    });
+
+    const dedupRows = Array.from(uniqueMap.values());
+    const duplicates = allRows.length - dedupRows.length;
+
+    console.log(`🔍 Dedup completato: ${dedupRows.length} righe uniche (${duplicates} duplicati rimossi)`);
+
+    return {
+      headers: masterHeaders || [],
+      rows: dedupRows,
+      stats: {
+        filesLoaded: validFiles.length,
+        filesTotal: files.length,
+        rowsTotal: allRows.length,
+        rowsUnique: dedupRows.length,
+        duplicates,
+        fileDetails: fileStats
+      }
+    };
   }
 
   function getMinMaxDates(records) {
@@ -2713,6 +3289,237 @@ function buildGestNcRecords(parsed, options = {}) {
     });
   }
 
+  return recs;
+}
+
+// ---------- ADE FATTURE VENDITE (FILE A - VENDITE) ----------
+function buildAdeSalesRecords(parsed) {
+  const normalizeAdeHeader = (name) =>
+    String(name || "")
+      .replace(/^\uFEFF/, "")
+      .replace(/\u00A0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  const H = parsed.headers;
+  const h = H.map(x => x.toLowerCase());
+  const normH = H.map(normalizeAdeHeader);
+
+  const cfg = getColumnConfig("ADE_SALES");
+
+  const findAdeCol = (targetLabel) => {
+    const target = normalizeAdeHeader(targetLabel);
+    let idx = normH.indexOf(target);
+    if (idx !== -1) return idx;
+    idx = normH.findIndex(nh => nh.includes(target));
+    return idx;
+  };
+
+  const colNum = cfg.num || findCol(H, h,
+    "numero fattura / documento", "numero fattura", "numero documento");
+
+  // Per vendite, priorità Data emissione
+  const colDataEmiss = findCol(H, h, "data emissione", "data fattura");
+  const colDataRicez = findCol(H, h, "data ricezione", "data di ricezione");
+  const colData = colDataEmiss || colDataRicez;
+  if (!colData) {
+    throw new Error("❌ Colonna DATA ADE Vendite non trovata: atteso 'Data emissione' o 'Data ricezione'");
+  }
+
+  // Cliente (cessionario/committente)
+  const colPivaCli = cfg.piva || findCol(H, h,
+    "partita iva cliente",
+    "partita iva cessionario",
+    "partita iva cessionario / committente",
+    "partita iva cessionario/committente");
+  const colDenCli = cfg.den || findCol(H, h,
+    "denominazione cliente",
+    "denominazione cessionario",
+    "denominazione cessionario / committente",
+    "denominazione cessionario/committente");
+
+  let idxImpAde = findAdeCol("Imponibile/Importo (totale in euro)");
+  let idxIvaAde = findAdeCol("Imposta (totale in euro)");
+  if (idxImpAde === -1 || idxIvaAde === -1) {
+    const missing = [];
+    if (idxImpAde === -1) missing.push("Imponibile/Importo (totale in euro)");
+    if (idxIvaAde === -1) missing.push("Imposta (totale in euro)");
+    throw new Error(`❌ Colonne ADE Vendite mancanti: ${missing.join(", ")}. Verifica l'export ADE.`);
+  }
+
+  const colImp = H[idxImpAde];
+  const colIva = H[idxIvaAde];
+  const colTipo = findCol(H, h, "tipo documento");
+
+  const recs = [];
+  for (const r of parsed.rows) {
+    const num = r[colNum] || "";
+    const den = colDenCli ? (r[colDenCli] || "") : "";
+    const piva = colPivaCli ? (r[colPivaCli] || "") : "";
+
+    // Date: per vendite, base = emissione; fallback ricezione
+    const dataRawEmiss = colDataEmiss ? (r[colDataEmiss] || "") : "";
+    const dataRawRicez = colDataRicez ? (r[colDataRicez] || "") : "";
+    const dataEmissIso = dataRawEmiss ? normalizeDateFlexible(dataRawEmiss) : "";
+    const dataRicezIso = dataRawRicez ? normalizeDateFlexible(dataRawRicez) : "";
+
+    const dataIso = dataEmissIso || dataRicezIso || "";
+    const data = dataIso ? parseDateFlexible(dataIso) : null;
+    const dataStr = dataIso ? formatDateIT(dataIso) : "";
+    const dateSource = dataEmissIso ? "emissione" : (dataRicezIso ? "ricezione" : "nessuna");
+
+    // Per IVA in vendite usiamo emissione (default), fallback ricezione
+    const vatDateIso = dataEmissIso || dataRicezIso || "";
+    const vatDate = vatDateIso ? parseDateFlexible(vatDateIso) : null;
+
+    let imp = parseNumberIT(r[colImp] || "");
+    let iva = cleanIVAValue(r[colIva], piva);
+
+    const tipoDocRaw = (colTipo ? (r[colTipo] || "") : "").toString().toUpperCase();
+    const isNCByTipo = tipoDocRaw.includes("TD04") || tipoDocRaw.includes("NOTA") || tipoDocRaw.includes("NC");
+    const isNCBySign = (imp < 0) || (iva < 0);
+
+    if (isNCByTipo) {
+      if (imp > 0) imp = -imp;
+      if (iva > 0) iva = -iva;
+    }
+    if (isNCBySign) {
+      imp = -Math.abs(imp);
+      iva = -Math.abs(iva);
+    }
+
+    let tot = +(imp + iva).toFixed(2);
+    const validated = fixAndValidateAmounts({ imp, iva, tot }, "ADE", num);
+    tot = validated.tot;
+
+    recs.push({
+      src: "ADE",
+      num,
+      numDigits: normalizeInvoiceNumber(num, false),
+      den,
+      denNorm: normalizeName(den),
+      piva,
+      pivaDigits: onlyDigits(piva),
+      dataRaw: dataRawEmiss || dataRawRicez,
+      dataIso,
+      data,
+      dataStr,
+      dateSource,
+      vatDateIso,
+      vatDate,
+      imp,
+      iva,
+      tot,
+      tipoDoc: tipoDocRaw,
+      isForeign: isForeignPiva(piva)
+    });
+  }
+  return recs;
+}
+
+// ---------- GESTIONALE FATTURE VENDITE (FILE B - VENDITE) ----------
+function buildGestSalesRecords(parsed, options = {}) {
+  const { fileName = "", isNotesCredit = false } = options;
+  const inferredNC = /nota|note|nc|credito/i.test(fileName || "");
+  const isGestNotesCredit = isNotesCredit || inferredNC;
+  const H = parsed.headers;
+  const h = H.map(x => x.toLowerCase());
+
+  const cfgGest = getColumnConfig("GEST_SALES");
+
+  // Numero documento simile ad acquisti
+  const colNumeroAlfa = H.find(hdr =>
+    String(hdr || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "numeroalfa"
+  );
+  const colNumDocEsteso = H.find(hdr =>
+    String(hdr || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "numerodocesteso"
+  );
+  const colDocumento = H.find(hdr =>
+    String(hdr || "").toLowerCase().replace(/[^a-z0-9]/g, "") === "documento"
+  );
+
+  let colNumConfig = cfgGest.num || null;
+  if (colNumeroAlfa) colNumConfig = colNumeroAlfa;
+  else if (colNumDocEsteso) colNumConfig = colNumDocEsteso;
+  else if (!colNumConfig) colNumConfig = colDocumento || findColGest(H, h, [
+    "numerofattura", "numero fattura", "nreggestionale", "numeroregistrazione", "numreg", "num", "doc"
+  ]);
+
+  const colPiva = cfgGest.piva || findColGest(H, h, [
+    "partita iva", "p.iva", "piva", "p iva", "pi", "cfpiva", "partitaiva", "p. iva cliente"
+  ]);
+
+  const colData = cfgGest.data || findColGest(H, h, [
+    "data", "data fattura", "data doc", "data documento", "data emissione", "data registrazione", "datareg"
+  ]);
+
+  const colDen = cfgGest.den || findColGest(H, h, [
+    "ragione sociale", "ragionesociale", "cliente", "clienti", "denominazione", "descrizione conto", "descr"
+  ]);
+
+  const colImp = cfgGest.imp || findColGest(H, h, [
+    "tot_imp", "imponibile", "totale imponibile", "totale", "totale fattura", "importo documento", "importo", "totale doc"
+  ]);
+  const colIva = cfgGest.iva || findColGest(H, h, [
+    "iva", "imposta", "importoiva", "tot_iva"
+  ]);
+  const colTot = cfgGest.tot || findColGest(H, h, [
+    "totale", "totalefattura", "tot_fattura", "importo documento", "importo", "totale doc", "totdoc"
+  ]);
+
+  const recs = [];
+  for (const r of parsed.rows) {
+    let num = "";
+    if (colNumConfig) {
+      const s = String(r[colNumConfig] || "").trim();
+      if (!/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s)) num = s;
+    }
+    if (!num && colDocumento) {
+      const s2 = String(r[colDocumento] || "").trim();
+      if (s2 && !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s2)) num = s2;
+    }
+
+    const den = colDen ? (r[colDen] || "") : "";
+    const piva = colPiva ? (r[colPiva] || "") : "";
+
+    const dataRaw = colData ? (r[colData] || "") : "";
+    const dataIso = normalizeDateFlexible(dataRaw);
+    const data = parseDateFlexible(dataIso);
+    const dataStr = dataIso ? formatDateIT(dataIso) : "";
+
+    let imp = colImp ? parseNumberIT(r[colImp]) : 0;
+    let iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;
+    let tot = colTot ? parseNumberIT(r[colTot]) : +(imp + iva).toFixed(2);
+
+    if (isGestNotesCredit) {
+      imp = -Math.abs(imp);
+      iva = -Math.abs(iva);
+      tot = -Math.abs(tot);
+    }
+
+    const validated = fixAndValidateAmounts({ imp, iva, tot }, "GEST", num);
+    tot = validated.tot;
+
+    recs.push({
+      src: "GEST",
+      num,
+      numDigits: normalizeInvoiceNumber(num, false),
+      den,
+      denNorm: normalizeName(den),
+      piva,
+      pivaDigits: onlyDigits(piva),
+      dataRaw,
+      dataIso,
+      data,
+      dataStr,
+      imp,
+      iva,
+      tot,
+      isNC: isGestNotesCredit,
+      isForeign: isForeignPiva(piva)
+    });
+  }
   return recs;
 }
 
@@ -4388,6 +5195,8 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     // Attiva il ridimensionamento sulla tabella appena renderizzata
     const tableEl = document.getElementById("resultTable");
     if (tableEl) createResizableTable(tableEl);
+
+    updateStickyHeaderOffsets();
   }
 
   // ---------- export riconciliazione ----------
@@ -4784,7 +5593,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       const content = await loadTableFromFile(file, false);
       const parsed = parseCSV(content);
       cachedHeaders[mappingKey] = parsed.headers;
-      await ensureGestConfigForHeaders(parsed.headers, description, true, mappingKey);
+      await ensureGestConfigForHeaders(parsed.headers, parsed.rows, description, true, mappingKey);
     } catch (e) {
       console.error("Errore durante la lettura del file", e);
       alert(`Errore lettura ${description}: ${e?.message || e}`);
@@ -4978,7 +5787,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 
   // ---------- MAPPING AUTOMATICO / MANUALE GESTIONALE ----------
 
-  async function ensureGestConfigForHeaders(headers, fileDescription, forcePopup = false, mappingKey = "GEST_B") {
+  async function ensureGestConfigForHeaders(headers, sampleRows, fileDescription, forcePopup = false, mappingKey = "GEST_B") {
     const key = mappingKey || "GEST_B";
     cachedHeaders[key] = headers || [];
 
@@ -5002,10 +5811,29 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     // Tentativo di rilevamento automatico per precompilare il modale
     console.log("🔍 Tentativo rilevamento automatico colonne...");
     const autoConfig = tryAutoDetectGestColumns(headers, fileDescription);
-    updateColumnConfig(key, autoConfig);
-
-    // Mostra comunque il modale per conferma esplicita (flow guidato)
-    console.log("⚠️ Configurazione da confermare: apro il modale mapping");
+    
+    // Valida la configurazione automatica
+    const v = validateGestConfig(headers, autoConfig, sampleRows);
+    
+    if (v.ok === true) {
+      // Config OK: salva e conferma automaticamente, NON aprire il popup
+      console.log("✅ Mapping rilevato automaticamente e validato con successo");
+      updateColumnConfig(key, autoConfig);
+      markMappingConfirmed(key, headers);
+      return;
+    }
+    
+    // Config non OK: precompila e apri modale mostrando i motivi
+    console.log("⚠️ Mapping richiede conferma manuale:", v.reasons);
+    updateColumnConfig(key, autoConfig); // precompila con il tentativo
+    
+    // Mostra il modale con i motivi della validazione fallita
+    const helper = document.getElementById("gestMapHelper");
+    if (helper) {
+      helper.innerHTML = `⚠️ <strong>Mapping richiede verifica:</strong><br>${v.reasons.join(" | ")}`;
+      helper.classList.add("error");
+    }
+    
     const userConfig = await openGestMappingModal(headers, fileDescription, key);
     if (userConfig) {
       markMappingConfirmed(key, headers);
@@ -5086,6 +5914,73 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     return config;
   }
 
+  // Validatore affidabilità mapping (controlla anomalie su campione righe)
+  function validateGestConfig(headers, cfg, sampleRows) {
+    const reasons = [];
+    const hasNum = !!cfg.num;
+    const hasData = !!cfg.data;
+    const hasTot = !!cfg.tot;
+    const hasImpIva = !!cfg.imp && !!cfg.iva;
+
+    if (!hasNum) reasons.push("Manca colonna Numero documento");
+    if (!hasData) reasons.push("Manca colonna Data documento");
+    if (!(hasTot || hasImpIva)) reasons.push("Manca Totale oppure coppia (Imponibile + IVA)");
+
+    // Se già mancano campi minimi: BLOCK
+    if (reasons.length) return { ok: false, severity: "BLOCK", reasons };
+
+    // Check anomalie su campione (prime 30 righe)
+    const rows = (sampleRows || []).slice(0, 30);
+    if (!rows.length) return { ok: true, severity: "OK", reasons: [] };
+
+    // helper parse numeri (riusa parseMoney/parseEuro già presente; se non c'è, implementa parseFloat robusto)
+    const toNum = (v) => {
+      if (v == null) return NaN;
+      const s = String(v).trim().replace(/\./g,"").replace(",",".").replace(/[^\d\.\-]/g,"");
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : NaN;
+    };
+
+    let badDate = 0, badTot = 0, badImp = 0, badIva = 0, ivaLooksRate = 0, totLessImp = 0, checked = 0;
+
+    for (const r of rows) {
+      checked++;
+      const tot = hasTot ? toNum(r[headers[cfg.tot]]) : NaN;
+      const imp = cfg.imp != null ? toNum(r[headers[cfg.imp]]) : NaN;
+      const iva = cfg.iva != null ? toNum(r[headers[cfg.iva]]) : NaN;
+      const d   = r[headers[cfg.data]];
+
+      // data: se non parseabile spesso, WARN
+      const dd = (d instanceof Date) ? d : new Date(d);
+      if (!(dd instanceof Date) || isNaN(dd.getTime())) badDate++;
+
+      if (hasTot && !Number.isFinite(tot)) badTot++;
+      if (cfg.imp != null && !Number.isFinite(imp)) badImp++;
+      if (cfg.iva != null && !Number.isFinite(iva)) badIva++;
+
+      // sospetto IVA = aliquota (4/5/10/22) ripetuta
+      if (Number.isFinite(iva) && iva >= 0 && iva <= 30 && Math.abs(iva - Math.round(iva)) < 1e-9) {
+        ivaLooksRate++;
+      }
+
+      // tot < imp troppo spesso = colonne sbagliate
+      if (Number.isFinite(tot) && Number.isFinite(imp) && tot + 0.01 < imp) totLessImp++;
+    }
+
+    const pct = (x) => checked ? (x / checked) : 0;
+
+    const warn = [];
+    if (pct(badDate) > 0.3) warn.push("Date non parseabili in molte righe");
+    if (hasTot && pct(badTot) > 0.3) warn.push("Totale spesso non numerico");
+    if (cfg.imp != null && pct(badImp) > 0.3) warn.push("Imponibile spesso non numerico");
+    if (cfg.iva != null && pct(badIva) > 0.3) warn.push("IVA spesso non numerica");
+    if (pct(ivaLooksRate) > 0.6) warn.push("La colonna IVA sembra un'aliquota (valori 4/5/10/22)");
+    if (pct(totLessImp) > 0.3) warn.push("Totale < Imponibile in molte righe (colonne sbagliate?)");
+
+    if (warn.length) return { ok: false, severity: "WARN", reasons: warn };
+    return { ok: true, severity: "OK", reasons: [] };
+  }
+
   function initMonthFilterOptions(results) {
   if (!monthFilterSelect) return;
 
@@ -5131,12 +6026,31 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     }
 
     statusEl.textContent = "Click rilevato, inizio lettura file...";
-    const fA = document.getElementById("fileA").files[0];
-    const fB = document.getElementById("fileB").files[0];
-    const fC = document.getElementById("fileC").files[0];
+    
+    // ============================================================
+    // 📁 SUPPORTO IMPORT CARTELLE (Feature Dic 2025)
+    // ============================================================
+    // Priorità: se c'è folderA/B/C con files, usa quelli invece di fileA/B/C
+    const fileAInput = document.getElementById("fileA");
+    const folderAInput = document.getElementById("folderA");
+    const fileBInput = document.getElementById("fileB");
+    const folderBInput = document.getElementById("folderB");
+    const fileCInput = document.getElementById("fileC");
+    const folderCInput = document.getElementById("folderC");
 
-    if (!fA || !fB) {
-      statusEl.textContent = "Carica almeno il file ADE (A) e il file fatture gestionale (B). Il file C (note credito) è opzionale.";
+    const useMultiA = folderAInput && folderAInput.files && folderAInput.files.length > 0;
+    const useMultiB = folderBInput && folderBInput.files && folderBInput.files.length > 0;
+    const useMultiC = folderCInput && folderCInput.files && folderCInput.files.length > 0;
+
+    const fA = useMultiA ? null : (fileAInput ? fileAInput.files[0] : null);
+    const fB = useMultiB ? null : (fileBInput ? fileBInput.files[0] : null);
+    const fC = useMultiC ? null : (fileCInput ? fileCInput.files[0] : null);
+
+    const hasAnyA = fA || useMultiA;
+    const hasAnyB = fB || useMultiB;
+
+    if (!hasAnyA || !hasAnyB) {
+      statusEl.textContent = "Carica almeno il file/cartella ADE (A) e il file/cartella fatture gestionale (B). Il file C (note credito) è opzionale.";
       return;
     }
 
@@ -5147,23 +6061,67 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     statusEl.textContent = "Elaborazione in corso...";
 
     try {
-      const [txtA, txtB, txtC] = await Promise.all([
-        loadTableFromFile(fA, true),   // File A = ADE → mantieni punto decimale
-        loadTableFromFile(fB, false),  // File B = GEST → converti virgola decimale
-        fC ? loadTableFromFile(fC, false) : Promise.resolve("")  // File C = Note Credito GEST → virgola decimale
-      ]);
+      // ============================================================
+      // 📁 CARICAMENTO FILES o CARTELLE
+      // ============================================================
+      let parsedA, parsedB, parsedC;
 
-      const parsedA = parseCSV(txtA);
-      const parsedB = parseCSV(txtB);
-      const parsedC = fC ? parseCSV(txtC) : { headers: [], rows: [] };
-
-      // 🟦 1) CHIEDO MAPPING PER FILE B (bloccante)
-      await ensureGestConfigForHeaders(parsedB.headers, "Gestionale Fatture (File B)", false, "GEST_B");
-
-      // 🟪 1-bis) SE ESISTE FILE C, CHIEDO MAPPING ANCHE PER C (indipendente)
-      if (parsedC && parsedC.headers && parsedC.headers.length > 0) {
-        await ensureGestConfigForHeaders(parsedC.headers, "Note Credito (File C)", false, "GEST_C");
+      if (useMultiA) {
+        statusEl.textContent = "Caricamento cartella ADE in corso...";
+        const result = await readFilesUnion(folderAInput.files, parseCSV, true, "ADE Acquisti");
+        parsedA = { headers: result.headers, rows: result.rows };
+        console.log(`✅ ADE: caricati ${result.stats.filesLoaded} file, ${result.stats.rowsUnique} righe uniche (duplicati rimossi: ${result.stats.duplicates})`);
+        statusEl.textContent = `ADE: ${result.stats.filesLoaded} file caricati, ${result.stats.rowsUnique} righe.`;
+      } else {
+        const txtA = await loadTableFromFile(fA, true);
+        parsedA = parseCSV(txtA);
       }
+
+      if (useMultiB) {
+        statusEl.textContent = "Caricamento cartella Gestionale in corso...";
+        const result = await readFilesUnion(folderBInput.files, parseCSV, false, "Gestionale Acquisti");
+        parsedB = { headers: result.headers, rows: result.rows };
+        console.log(`✅ GEST: caricati ${result.stats.filesLoaded} file, ${result.stats.rowsUnique} righe uniche (duplicati rimossi: ${result.stats.duplicates})`);
+        statusEl.textContent = `Gestionale: ${result.stats.filesLoaded} file caricati, ${result.stats.rowsUnique} righe.`;
+      } else {
+        const txtB = await loadTableFromFile(fB, false);
+        parsedB = parseCSV(txtB);
+      }
+
+      if (useMultiC) {
+        statusEl.textContent = "Caricamento cartella Note Credito in corso...";
+        const result = await readFilesUnion(folderCInput.files, parseCSV, false, "Note Credito");
+        parsedC = { headers: result.headers, rows: result.rows };
+        console.log(`✅ NC: caricati ${result.stats.filesLoaded} file, ${result.stats.rowsUnique} righe uniche (duplicati rimossi: ${result.stats.duplicates})`);
+        statusEl.textContent = `Note Credito: ${result.stats.filesLoaded} file caricati, ${result.stats.rowsUnique} righe.`;
+      } else if (fC) {
+        const txtC = await loadTableFromFile(fC, false);
+        parsedC = parseCSV(txtC);
+      } else {
+        parsedC = { headers: [], rows: [] };
+      }
+
+      statusEl.textContent = "Parsing completato, verifica mapping...";
+
+      // 🟦 1) AUTO-DETECTION MAPPING FILE B (bloccante se serve conferma)
+      const cfgB = await ensureMappingOrAsk(parsedB.headers, parsedB.rows, "GEST_B", "Gestionale Fatture (File B)");
+      if (!cfgB) {
+        statusEl.textContent = "❌ Mapping File B richiesto. Conferma le colonne e riprova.";
+        btnMatch.disabled = false;
+        return;
+      }
+
+      // 🟪 1-bis) SE ESISTE FILE C, AUTO-DETECTION ANCHE PER C
+      if (parsedC && parsedC.headers && parsedC.headers.length > 0) {
+        const cfgC = await ensureMappingOrAsk(parsedC.headers, parsedC.rows, "GEST_C", "Note Credito (File C)");
+        if (!cfgC) {
+          statusEl.textContent = "❌ Mapping File C richiesto. Conferma le colonne e riprova.";
+          btnMatch.disabled = false;
+          return;
+        }
+      }
+
+      statusEl.textContent = "Mapping confermato, costruzione record...";
 
       // 🟩 2) SOLO ORA costruisco i record
       const adeRecords = buildAdeRecords(parsedA);
@@ -5351,7 +6309,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
           }
 
           // Chiamiamo la funzione di mapping forzando la comparsa del popup
-          await ensureGestConfigForHeaders(parsed.headers, fileDescription, true, mappingKey);
+          await ensureGestConfigForHeaders(parsed.headers, parsed.rows, fileDescription, true, mappingKey);
           statusEl.textContent = `Mapping per "${fileDescription}" aggiornato. Ora puoi premere "Confronta fatture".`;
           flowState.matchDone = false;
           flowState.correctionsDone = false;
@@ -5776,6 +6734,464 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     applyFilterAndRender();
   }
 
+  // ============================================================
+  // VENDITE: RENDERING, MATCH HANDLER, EXPORTS (Sezione Sales)
+  // ============================================================
+
+  function getFilteredSalesResults() {
+    // Se non ci sono risultati, ritorna array vuoto
+    if (!lastSalesResults || !lastSalesResults.length) return [];
+
+    // 1. Base: righe non eliminate
+    let filtered = lastSalesResults.filter(r => !r.deleted);
+
+    // 2. Filtro Stato (Bottoni: Tutti, Match OK, ecc.)
+    if (currentSalesFilter !== "ALL") {
+      filtered = filtered.filter(r => r.STATUS === currentSalesFilter);
+    }
+
+    // 3. Filtro Mese (data ADE)
+    if (salesMonthFilter) {
+      filtered = filtered.filter(r => {
+        if (!r.ADE || !r.ADE.data) return false;
+        return monthKeyFromDate(r.ADE.data) === salesMonthFilter;
+      });
+    }
+
+    // 4. Filtro Cliente (denominazione o P.IVA)
+    if (salesPartyFilter && salesPartyFilter.trim() !== "") {
+      const term = salesPartyFilter.trim().toUpperCase();
+      filtered = filtered.filter(r => {
+        const aDenNorm = (r.ADE?.denNorm || "").toUpperCase();
+        const aDen = (r.ADE?.den || "").toUpperCase();
+        const aPiva = (r.ADE?.piva || "").toUpperCase();
+        const gDenNorm = (r.GEST?.denNorm || "").toUpperCase();
+        const gDen = (r.GEST?.den || "").toUpperCase();
+        const gPiva = (r.GEST?.piva || "").toUpperCase();
+        return (
+          aDenNorm.includes(term) || aDen.includes(term) || aPiva.includes(term) ||
+          gDenNorm.includes(term) || gDen.includes(term) || gPiva.includes(term)
+        );
+      });
+    }
+
+    // 5. Filtro Numero Fattura
+    if (salesNumFilter && salesNumFilter.trim() !== "") {
+      const needle = salesNumFilter.trim().toLowerCase();
+      filtered = filtered.filter(r => {
+        const adeNum = String(r.ADE?.num || "").toLowerCase();
+        const gestNum = String(r.GEST?.num || "").toLowerCase();
+        return adeNum.includes(needle) || gestNum.includes(needle);
+      });
+    }
+
+    return filtered;
+  }
+
+  function applySalesFilterAndRender() {
+    // 1. Ottieni i dati filtrati
+    const filteredResults = getFilteredSalesResults();
+
+    // 2. Render con i filtrati come display, ma conta su tutti i lastSalesResults
+    renderSalesResults(filteredResults, lastSalesResults);
+
+    // 3. Aggiorna contatore vista attuale
+    const btnVisible = document.getElementById("btnSalesExportVisible");
+    if (btnVisible) {
+      const count = filteredResults.length;
+      btnVisible.innerHTML = `<span class="btn-icon">👁️</span> VISTA ATTUALE (${count})`;
+      btnVisible.disabled = count === 0;
+    }
+
+    // 4. Aggiorna status text con info filtro
+    const total = (lastSalesResults || []).filter(r => !r.deleted).length;
+    const visible = filteredResults.length;
+    const adeCount = totalAdeSalesCount || (lastAdeSalesRecords?.length ?? 0);
+    const gestCount = totalGestSalesCount || (lastGestSalesRecords?.length ?? 0);
+    const statusEl = document.getElementById("salesStatusText");
+    if (statusEl) {
+      if (visible < total) {
+        statusEl.textContent = `Righe visibili: ${visible} | Totale match: ${total} | ADE Vendite: ${adeCount} | Gestionale: ${gestCount}`;
+      } else {
+        statusEl.textContent = `Confronto vendite: ${total} righe attive | ADE Vendite: ${adeCount} | Gestionale: ${gestCount}`;
+      }
+    }
+
+    // 5. Abilita/disabilita export buttons
+    const hasData = filteredResults.length > 0;
+    const btnAll = document.getElementById("btnSalesExportAll");
+    const btnAde = document.getElementById("btnSalesExportAde");
+    const btnGest = document.getElementById("btnSalesExportGest");
+    const btnFix = document.getElementById("btnSalesExportFix");
+    if (btnAll) btnAll.disabled = !lastSalesResults || lastSalesResults.length === 0;
+    if (btnAde) btnAde.disabled = !lastSalesResults || lastSalesResults.filter(r => !r.deleted && r.STATUS === "SOLO_ADE").length === 0;
+    if (btnGest) btnGest.disabled = !lastSalesResults || lastSalesResults.filter(r => !r.deleted && r.STATUS === "SOLO_GEST").length === 0;
+    if (btnFix) btnFix.disabled = !lastSalesResults || lastSalesResults.filter(r => !r.deleted && r.STATUS === "MATCH_FIX").length === 0;
+  }
+
+  function renderSalesResults(resultsToRender, fullResultsForCounts) {
+    const tbody = document.querySelector("#salesResultTable tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const full = fullResultsForCounts || resultsToRender;
+    let cntOk = 0, cntFix = 0, cntAde = 0, cntGest = 0;
+    for (const row of full) {
+      if (row.deleted) continue;
+      if (row.STATUS === "MATCH_OK") cntOk++;
+      else if (row.STATUS === "MATCH_FIX") cntFix++;
+      else if (row.STATUS === "SOLO_ADE") cntAde++;
+      else if (row.STATUS === "SOLO_GEST") cntGest++;
+    }
+
+    for (const row of resultsToRender) {
+      if (row.deleted) continue;
+      const tr = document.createElement("tr");
+
+      let cls = "", pillClass = "", pillText = "";
+      if (row.STATUS === "MATCH_OK") { cls = "status-match-ok"; pillClass = "pill-ok"; pillText = "MATCH OK"; }
+      else if (row.STATUS === "MATCH_FIX") { cls = "status-match-fix"; pillClass = "pill-fix"; pillText = "MATCH DA CORREGGERE"; }
+      else if (row.STATUS === "SOLO_ADE") { cls = "status-solo-ade"; pillClass = "pill-ade"; pillText = "SOLO ADE"; }
+      else if (row.STATUS === "SOLO_GEST") { cls = "status-solo-gest"; pillClass = "pill-gest"; pillText = "SOLO GESTIONALE"; }
+      tr.className = cls;
+
+      const a = row.ADE; const g = row.GEST;
+      const tdText = (text, extraClass = "") => { const td = document.createElement("td"); if (extraClass) td.className = extraClass; td.textContent = text ?? ""; return td; };
+
+      // ADE
+      tr.appendChild(tdText(a ? a.num : "", "mono"));
+      tr.appendChild(tdText(a ? a.den : ""));
+      tr.appendChild(tdText(a ? a.piva : "", "mono"));
+      const adeDateDisplay = a ? (a.dataIso ? formatDateIT(a.dataIso) : (a.dataStr || "")) : "";
+      tr.appendChild(tdText(adeDateDisplay, "mono"));
+      tr.appendChild(tdText(a ? a.imp.toFixed(2) : "", "mono"));
+      tr.appendChild(tdText(a ? a.iva.toFixed(2) : "", "mono"));
+      tr.appendChild(tdText(a ? a.tot.toFixed(2) : "", "mono"));
+
+      // GEST
+      tr.appendChild(tdText(g ? g.num : "", "mono"));
+      tr.appendChild(tdText(g ? g.den : ""));
+      const gestDateDisplay = g ? (g.dataIso ? formatDateIT(g.dataIso) : (g.dataStr || "")) : "";
+      tr.appendChild(tdText(gestDateDisplay, "mono"));
+      tr.appendChild(tdText(g ? g.imp.toFixed(2) : "", "mono"));
+      tr.appendChild(tdText(g ? g.iva.toFixed(2) : "", "mono"));
+      tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
+
+      // Stato + Criterio
+      const tdStatus = document.createElement("td");
+      const span = document.createElement("span");
+      span.className = "status-pill " + pillClass;
+      span.textContent = pillText;
+      tdStatus.appendChild(span);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdText(row.CRITERIO || "", "muted criterio-cell"));
+
+      tbody.appendChild(tr);
+    }
+
+    const cntOkEl = document.getElementById("salesCntOk");
+    const cntFixEl = document.getElementById("salesCntFix");
+    const cntAdeEl = document.getElementById("salesCntAde");
+    const cntGestEl = document.getElementById("salesCntGest");
+    if (cntOkEl) cntOkEl.textContent = cntOk;
+    if (cntFixEl) cntFixEl.textContent = cntFix;
+    if (cntAdeEl) cntAdeEl.textContent = cntAde;
+    if (cntGestEl) cntGestEl.textContent = cntGest;
+
+    const sumRow = document.getElementById("salesSummaryRow");
+    const toolbar = document.getElementById("salesTableToolbar");
+    const container = document.getElementById("salesTableContainer");
+    if (sumRow) sumRow.style.display = "flex";
+    if (toolbar) toolbar.style.display = "block";
+    if (container) container.style.display = "block";
+
+    const total = (full || []).filter(r => !r.deleted).length;
+    const adeCount = totalAdeSalesCount || (lastAdeSalesRecords?.length ?? 0);
+    const gestCount = totalGestSalesCount || (lastGestSalesRecords?.length ?? 0);
+    const statusEl = document.getElementById("salesStatusText");
+    if (statusEl) statusEl.textContent = `Confronto vendite: ${total} righe attive (OK: ${cntOk}, Fix: ${cntFix}, Solo ADE: ${cntAde}, Solo Gest.: ${cntGest}) | ADE Vendite: ${adeCount} | Gestionale: ${gestCount}`;
+
+    const tableEl = document.getElementById("salesResultTable");
+    if (tableEl) createResizableTable(tableEl);
+
+    updateStickyHeaderOffsets();
+  }
+
+  // --- Gestione match vendite ---
+  const btnSalesMatch = document.getElementById("btnSalesMatch");
+  const btnSalesExportAll = document.getElementById("btnSalesExportAll");
+  const btnSalesExportAde = document.getElementById("btnSalesExportAde");
+  const btnSalesExportGest = document.getElementById("btnSalesExportGest");
+  const btnSalesExportFix = document.getElementById("btnSalesExportFix");
+
+  if (btnSalesMatch) {
+    btnSalesMatch.addEventListener("click", async () => {
+      const statusEl = document.getElementById("salesStatusText");
+      if (statusEl) statusEl.textContent = "Inizio lettura file vendite...";
+
+      const fileA = document.getElementById("salesFileAde");
+      const folderA = document.getElementById("salesFolderAde");
+      const fileB = document.getElementById("salesFileGest");
+      const folderB = document.getElementById("salesFolderGest");
+      const fileC = document.getElementById("salesFileNc");
+      const folderC = document.getElementById("salesFolderNc");
+
+      const useMultiA = folderA && folderA.files && folderA.files.length > 0;
+      const useMultiB = folderB && folderB.files && folderB.files.length > 0;
+      const useMultiC = folderC && folderC.files && folderC.files.length > 0;
+
+      const fA = useMultiA ? null : (fileA ? fileA.files[0] : null);
+      const fB = useMultiB ? null : (fileB ? fileB.files[0] : null);
+      const fC = useMultiC ? null : (fileC ? fileC.files[0] : null);
+
+      const hasA = !!(fA || useMultiA);
+      const hasB = !!(fB || useMultiB);
+      if (!hasA || !hasB) {
+        if (statusEl) statusEl.textContent = "Carica almeno ADE Vendite (A) e Gestionale Vendite (B). Il file C è opzionale.";
+        return;
+      }
+
+      btnSalesMatch.disabled = true;
+      try {
+        let parsedA, parsedB, parsedC;
+        if (useMultiA) {
+          const result = await readFilesUnion(folderA.files, parseCSV, true, "ADE Vendite");
+          parsedA = { headers: result.headers, rows: result.rows };
+          if (statusEl) statusEl.textContent = `ADE Vendite: ${result.stats.filesLoaded} file, ${result.stats.rowsUnique} righe.`;
+        } else {
+          const txt = await loadTableFromFile(fA, true);
+          parsedA = parseCSV(txt);
+        }
+
+        if (useMultiB) {
+          const result = await readFilesUnion(folderB.files, parseCSV, false, "Gestionale Vendite");
+          parsedB = { headers: result.headers, rows: result.rows };
+          if (statusEl) statusEl.textContent = `Gestionale Vendite: ${result.stats.filesLoaded} file, ${result.stats.rowsUnique} righe.`;
+        } else {
+          const txt = await loadTableFromFile(fB, false);
+          parsedB = parseCSV(txt);
+        }
+
+        if (useMultiC) {
+          const result = await readFilesUnion(folderC.files, parseCSV, false, "Note Credito Vendite");
+          parsedC = { headers: result.headers, rows: result.rows };
+        } else if (fC) {
+          const txt = await loadTableFromFile(fC, false);
+          parsedC = parseCSV(txt);
+        } else {
+          parsedC = { headers: [], rows: [] };
+        }
+
+        // Auto-detection mapping Gestionale Vendite
+        if (statusEl) statusEl.textContent = "Verifica mapping vendite...";
+        
+        const cfgSalesB = await ensureMappingOrAsk(parsedB.headers, parsedB.rows, "GEST_SALES", "Gestionale Vendite (File B)");
+        if (!cfgSalesB) {
+          if (statusEl) statusEl.textContent = "❌ Mapping Gestionale Vendite richiesto. Conferma le colonne e riprova.";
+          btnSalesMatch.disabled = false;
+          return;
+        }
+
+        if (parsedC && parsedC.headers && parsedC.headers.length > 0) {
+          const cfgSalesC = await ensureMappingOrAsk(parsedC.headers, parsedC.rows, "GEST_SALES_NC", "Note Credito Vendite (File C)");
+          if (!cfgSalesC) {
+            if (statusEl) statusEl.textContent = "❌ Mapping Note Credito Vendite richiesto. Conferma le colonne e riprova.";
+            btnSalesMatch.disabled = false;
+            return;
+          }
+        }
+
+        if (statusEl) statusEl.textContent = "Mapping confermato, costruzione record vendite...";
+
+        // Costruzione record
+        const adeSales = buildAdeSalesRecords(parsedA);
+        const gestSales = buildGestSalesRecords(parsedB, { fileName: fB?.name, isNotesCredit: false });
+        const gestNcSales = parsedC.rows.length ? buildGestSalesRecords(parsedC, { fileName: fC?.name, isNotesCredit: true }) : [];
+        const gestAll = gestSales.concat(gestNcSales);
+
+        totalAdeSalesCount = adeSales.length;
+        totalGestSalesCount = gestAll.length;
+        lastAdeSalesRecords = adeSales;
+        lastGestSalesRecords = gestAll;
+
+        let results = matchRecords(adeSales, gestAll);
+        results = flagSuspiciousSoloAdeSoloGest(results);
+        nextSalesResultId = 1;
+        results.forEach(r => { r.id = nextSalesResultId++; r.rowId = r.id; r.deleted = false; r.matchNote = r.matchNote || ""; });
+        lastSalesResults = results;
+        originalSalesResults = JSON.parse(JSON.stringify(results));
+
+        // Popola dropdown mesi vendite
+        populateSalesMonthFilter();
+
+        // UI update con filtri
+        applySalesFilterAndRender();
+
+        // Aggiorna IVA completa se visibile
+        try { renderVatTableComplete(); } catch (e) { /* ignore if not available */ }
+      } catch (e) {
+        console.error(e);
+        if (statusEl) statusEl.textContent = "Errore confronto vendite: " + (e && e.message ? e.message : e);
+      } finally {
+        btnSalesMatch.disabled = false;
+      }
+    });
+  }
+
+  // Sales export buttons
+  if (btnSalesExportAll) btnSalesExportAll.addEventListener("click", () => { if (lastSalesResults?.length) exportToCSV(lastSalesResults, "vendite_tutte"); });
+  if (btnSalesExportAde) btnSalesExportAde.addEventListener("click", () => { const subset = (lastSalesResults||[]).filter(r => !r.deleted && r.STATUS === "SOLO_ADE"); exportToCSV(subset, "vendite_solo_ADE"); });
+  if (btnSalesExportGest) btnSalesExportGest.addEventListener("click", () => { const subset = (lastSalesResults||[]).filter(r => !r.deleted && r.STATUS === "SOLO_GEST"); exportToCSV(subset, "vendite_solo_GEST"); });
+  if (btnSalesExportFix) btnSalesExportFix.addEventListener("click", () => { const subset = (lastSalesResults||[]).filter(r => !r.deleted && r.STATUS === "MATCH_FIX"); exportToCSV(subset, "vendite_solo_FIX"); });
+
+  // Sales export vista attuale
+  const btnSalesExportVisible = document.getElementById("btnSalesExportVisible");
+  if (btnSalesExportVisible) {
+    btnSalesExportVisible.addEventListener("click", () => {
+      const filtered = getFilteredSalesResults();
+      if (!filtered || filtered.length === 0) {
+        alert("Nessuna riga visibile da esportare.");
+        return;
+      }
+      const today = new Date().toISOString().split('T')[0];
+      exportToCSV(filtered, `vendite_vista_attuale_${today}`);
+    });
+  }
+
+  // Popola dropdown mesi vendite
+  function populateSalesMonthFilter() {
+    const salesMonthFilterSelect = document.getElementById("salesMonthFilter");
+    if (!salesMonthFilterSelect) return;
+
+    const monthSet = new Set();
+    for (const r of (lastSalesResults || [])) {
+      if (!r.ADE || !r.ADE.data) continue;
+      const key = monthKeyFromDate(r.ADE.data);
+      monthSet.add(key);
+    }
+
+    salesMonthFilterSelect.innerHTML = "";
+
+    const optAll = document.createElement("option");
+    optAll.value = "";
+    optAll.textContent = "Tutti i mesi ADE";
+    salesMonthFilterSelect.appendChild(optAll);
+
+    const months = Array.from(monthSet).sort();
+    months.forEach(key => {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = monthLabelFromKey(key);
+      salesMonthFilterSelect.appendChild(opt);
+    });
+
+    salesMonthFilterSelect.disabled = months.length === 0;
+    salesMonthFilter = null;
+    salesMonthFilterSelect.value = "";
+  }
+
+  // Event listener filtri stato vendite (pill buttons)
+  const salesFilterBtns = document.querySelectorAll("#salesFilterRow .filter-btn");
+  salesFilterBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      salesFilterBtns.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentSalesFilter = btn.dataset.filter || "ALL";
+      applySalesFilterAndRender();
+    });
+  });
+
+  // Event listener filtro mese vendite
+  const salesMonthFilterSelect = document.getElementById("salesMonthFilter");
+  if (salesMonthFilterSelect) {
+    salesMonthFilterSelect.addEventListener("change", (e) => {
+      salesMonthFilter = e.target.value || null;
+      applySalesFilterAndRender();
+    });
+  }
+
+  // Event listener filtro cliente vendite (con debounce)
+  const salesPartyFilterInput = document.getElementById("salesPartyFilter");
+  if (salesPartyFilterInput) {
+    let salesPartyDebounce = null;
+    salesPartyFilterInput.addEventListener("input", (e) => {
+      clearTimeout(salesPartyDebounce);
+      salesPartyDebounce = setTimeout(() => {
+        salesPartyFilter = e.target.value || "";
+        applySalesFilterAndRender();
+      }, 200);
+    });
+  }
+
+  // Event listener filtro numero vendite (con debounce)
+  const salesNumFilterInput = document.getElementById("salesNumFilter");
+  if (salesNumFilterInput) {
+    let salesNumDebounce = null;
+    salesNumFilterInput.addEventListener("input", (e) => {
+      clearTimeout(salesNumDebounce);
+      salesNumDebounce = setTimeout(() => {
+        salesNumFilter = e.target.value || "";
+        applySalesFilterAndRender();
+      }, 200);
+    });
+  }
+
+  // Event listener pulisci filtri vendite
+  const btnSalesClearFilters = document.getElementById("btnSalesClearFilters");
+  if (btnSalesClearFilters) {
+    btnSalesClearFilters.addEventListener("click", () => {
+      // Reset stato filtri
+      currentSalesFilter = "ALL";
+      salesMonthFilter = null;
+      salesPartyFilter = "";
+      salesNumFilter = "";
+
+      // Reset UI
+      salesFilterBtns.forEach(b => b.classList.remove("active"));
+      const allBtn = document.getElementById("salesFilterAll");
+      if (allBtn) allBtn.classList.add("active");
+
+      if (salesMonthFilterSelect) salesMonthFilterSelect.value = "";
+      if (salesPartyFilterInput) salesPartyFilterInput.value = "";
+      if (salesNumFilterInput) salesNumFilterInput.value = "";
+
+      // Re-render
+      applySalesFilterAndRender();
+    });
+  }
+
+  // Pulsanti per forzare il mapping (vendite)
+  const btnSalesForceMapB = document.getElementById("btnSalesForceMapB");
+  const btnSalesForceMapC = document.getElementById("btnSalesForceMapC");
+  if (btnSalesForceMapB) {
+    btnSalesForceMapB.addEventListener("click", async () => {
+      const fileInput = document.getElementById("salesFileGest");
+      if (!fileInput || !fileInput.files[0]) { alert("Seleziona prima un file Gestionale Vendite (B)."); return; }
+      try {
+        const txt = await loadTableFromFile(fileInput.files[0], false);
+        const parsed = parseCSV(txt);
+        await ensureGestConfigForHeaders(parsed.headers, parsed.rows, "Gestionale Vendite (File B)", true, "GEST_SALES");
+        const st = document.getElementById("salesStatusText");
+        if (st) st.textContent = "Mapping aggiornato per Gestionale Vendite. Ora puoi premere Confronta.";
+      } catch (e) {
+        console.error(e); alert("Errore durante la lettura colonne per mapping.");
+      }
+    });
+  }
+  if (btnSalesForceMapC) {
+    btnSalesForceMapC.addEventListener("click", async () => {
+      const fileInput = document.getElementById("salesFileNc");
+      if (!fileInput || !fileInput.files[0]) { alert("Seleziona prima un file Note Credito Vendite (C)."); return; }
+      try {
+        const txt = await loadTableFromFile(fileInput.files[0], false);
+        const parsed = parseCSV(txt);
+        await ensureGestConfigForHeaders(parsed.headers, parsed.rows, "Note Credito Vendite (File C)", true, "GEST_SALES_NC");
+        const st = document.getElementById("salesStatusText");
+        if (st) st.textContent = "Mapping aggiornato per Note Credito Vendite.";
+      } catch (e) { console.error(e); alert("Errore durante la lettura colonne per mapping."); }
+    });
+  }
+
     function bulkApproveMatchesForSupplier(baseRow, applyOnlyFix = true) {
     if (!baseRow || !baseRow.ADE || !baseRow.GEST) return;
 
@@ -5975,9 +7391,10 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   const navTabs = Array.from(document.querySelectorAll(".nav-tab"));
   const sections = {
     "section-recon": document.getElementById("section-recon"),
+    "section-sales": document.getElementById("section-sales"),
     "section-analysis": document.getElementById("section-analysis"),
     "section-dashboard": document.getElementById("section-dashboard"),
-    "section-vat": document.getElementById("section-vat"), // <--- AGGIUNTA
+    "section-vat": document.getElementById("section-vat"),
   };
 
   navTabs.forEach(tab => {
@@ -5985,10 +7402,19 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       const targetId = tab.dataset.section;
       if (!targetId) return;
 
-      navTabs.forEach(t => t.classList.toggle("active", t === tab));
-      Object.entries(sections).forEach(([id, el]) => {
-        el.classList.toggle("active", id === targetId);
+      // Rimuovi active da tutti i tab e sezioni
+      navTabs.forEach(t => t.classList.remove("active"));
+      Object.values(sections).forEach(el => {
+        if (!el) return; // Protezione: se sezione non esiste, salta
+        el.classList.remove("active");
       });
+
+      // Aggiungi active solo al tab e sezione selezionati
+      tab.classList.add("active");
+      const targetSection = sections[targetId];
+      if (targetSection) {
+        targetSection.classList.add("active");
+      }
     });
   });
 
@@ -6457,11 +7883,379 @@ function renderPeriodKpi(results) {
     });
   }
 
+  // ============================================================
+  // 📊 LIQUIDAZIONE IVA COMPLETA (Acquisti + Vendite)
+  // Feature Dic 2025
+  // ============================================================
+
+  /**
+   * Calcola aggregati mensili per liquidazione IVA completa
+   * @returns {Array} - Array di {mese, ivaAcq, ivaVen, saldo, nAcq, nVen, ...}
+   */
+  function computeMonthlyVatComplete() {
+    const lsBasisKey = "contaibl-vat-date-basis";
+    let basis = (localStorage.getItem(lsBasisKey) || "RICEZIONE").toUpperCase();
+    const selBasis = document.getElementById("vatDateBasis");
+    if (selBasis) basis = String(selBasis.value || basis).toUpperCase();
+
+    const basisSales = "EMISSIONE"; // Per vendite usiamo sempre emissione
+
+    const monthlyMap = new Map();
+
+    // 1. ACQUISTI (IVA a CREDITO)
+    (lastAdeRecords || []).forEach(rec => {
+      const date = getVatDateForRecordHelper(rec, basis);
+      if (!date) return;
+      
+      const key = monthKeyFromDate(date);
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          mese: key,
+          impAcq: 0, ivaAcq: 0, totAcq: 0, nAcq: 0,
+          impVen: 0, ivaVen: 0, totVen: 0, nVen: 0
+        });
+      }
+      
+      const m = monthlyMap.get(key);
+      m.impAcq += parseFloat(rec.imp) || 0;
+      m.ivaAcq += parseFloat(rec.iva) || 0;
+      m.totAcq += parseFloat(rec.tot) || 0;
+      m.nAcq++;
+    });
+
+    // 2. VENDITE (IVA a DEBITO)
+    (lastAdeSalesRecords || []).forEach(rec => {
+      const date = getVatDateForRecordHelper(rec, basisSales);
+      if (!date) return;
+      
+      const key = monthKeyFromDate(date);
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          mese: key,
+          impAcq: 0, ivaAcq: 0, totAcq: 0, nAcq: 0,
+          impVen: 0, ivaVen: 0, totVen: 0, nVen: 0
+        });
+      }
+      
+      const m = monthlyMap.get(key);
+      m.impVen += parseFloat(rec.imp) || 0;
+      m.ivaVen += parseFloat(rec.iva) || 0;
+      m.totVen += parseFloat(rec.tot) || 0;
+      m.nVen++;
+    });
+
+    // 3. CALCOLA SALDO BASE
+    const months = Array.from(monthlyMap.values()).map(m => {
+      return {
+        ...m,
+        saldoIva: m.ivaVen - m.ivaAcq  // DEBITO - CREDITO
+      };
+    });
+
+    // Ordina per mese
+    months.sort((a, b) => a.mese.localeCompare(b.mese));
+
+    // 4. CALCOLA RUNNING BALANCE CON F24
+    const state = loadVatState();
+    let carryIn = state.openingBalance || 0;
+
+    months.forEach(m => {
+      const monthBalance = m.saldoIva;
+      const gross = carryIn + monthBalance;
+      
+      // F24 pagato (limitato al gross se positivo)
+      let f24Paid = getMonthState(m.mese).f24Paid || 0;
+      
+      if (gross <= 0) {
+        // Se in credito, F24 deve essere 0
+        f24Paid = 0;
+        if (getMonthState(m.mese).f24Paid > 0) {
+          setMonthF24Paid(m.mese, 0); // Forza a 0 nello storage
+        }
+      } else {
+        // Clamp F24 a max gross
+        f24Paid = Math.min(f24Paid, gross);
+      }
+      
+      // Running balance dopo pagamento
+      let running = gross - f24Paid;
+      
+      // Tolleranza per arrotondamento
+      if (Math.abs(running) < 0.01) {
+        running = 0;
+      }
+      
+      // Auto-chiusura se running è 0
+      const paidAuto = (running === 0 && gross > 0);
+      if (paidAuto && !getMonthState(m.mese).paid) {
+        setMonthPaid(m.mese, true, new Date().toISOString());
+      }
+      
+      // Aggiorna oggetto mese
+      m.carryIn = carryIn;
+      m.gross = gross;
+      m.f24Paid = f24Paid;
+      m.running = running;
+      m.paidAuto = paidAuto;
+      m.paid = getMonthState(m.mese).paid || paidAuto;
+      
+      // Carry per mese successivo
+      carryIn = running;
+    });
+
+    return months;
+  }
+
+  /**
+   * Helper: ottieni data per competenza IVA
+   */
+  function getVatDateForRecordHelper(rec, basis) {
+    if (basis === "EMISSIONE") return rec.dataEmissione || rec.data;
+    if (basis === "RICEZIONE") return rec.dataRicezione || rec.data;
+    if (basis === "AUTO") {
+      return rec.dataRicezione || rec.dataEmissione || rec.data;
+    }
+    return rec.data;
+  }
+
+  /**
+   * Renderizza tabella IVA mensile completa (Acquisti + Vendite)
+   */
+  function renderVatTableComplete() {
+    const tbody = document.getElementById("vatTbody");
+    const elCredito = document.getElementById("vatCredito");
+    const elDebito = document.getElementById("vatDebito");
+    const elSaldo = document.getElementById("vatSaldo");
+    const chkShowClosed = document.getElementById("chkShowClosedMonths");
+    const showClosed = chkShowClosed ? chkShowClosed.checked : true;
+
+    if (!tbody) return;
+
+    const months = computeMonthlyVatComplete();
+
+    tbody.innerHTML = "";
+
+    if (!months.length) {
+      tbody.innerHTML = "<tr><td colspan='11' style='text-align:center; padding:20px;'>Nessun dato disponibile.</td></tr>";
+      if (elCredito) elCredito.textContent = "€ 0,00";
+      if (elDebito) elDebito.textContent = "€ 0,00";
+      if (elSaldo) elSaldo.textContent = "€ 0,00";
+      return;
+    }
+
+    let totCredito = 0, totDebito = 0, totSaldo = 0;
+    let lastVisibleRunning = 0;
+
+    months.forEach(m => {
+      // Filtro mesi chiusi se checkbox non attivo
+      if (!showClosed && m.paid) {
+        return;
+      }
+
+      const tr = document.createElement("tr");
+      
+      // Warning se manca uno dei due lati
+      const missingAcq = m.nAcq === 0;
+      const missingVen = m.nVen === 0;
+      if (missingAcq || missingVen) {
+        tr.classList.add("vat-warning-row");
+        tr.title = missingAcq ? "⚠️ Mancano acquisti per questo mese" : "⚠️ Mancano vendite per questo mese";
+      }
+
+      // Se mese chiuso, aggiungi class
+      if (m.paid) {
+        tr.classList.add("vat-closed");
+      }
+
+      // Badge chiusa
+      const badgeClosed = m.paid ? '<span class="badge-closed">✅ CHIUSA</span>' : '';
+
+      // Input F24
+      const inputDisabled = m.gross <= 0 ? 'disabled' : '';
+      const f24InputHtml = `<input type="number" class="vat-f24-input" data-month="${m.mese}" value="${m.f24Paid.toFixed(2)}" step="0.01" min="0" ${inputDisabled} />`;
+
+      tr.innerHTML = `
+        <td>${monthLabelFromKey(m.mese)}</td>
+        <td style="text-align:right" class="num">${formatNumberITDisplay(m.ivaAcq)}</td>
+        <td style="text-align:right" class="num">${formatNumberITDisplay(m.ivaVen)}</td>
+        <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.saldoIva)}</td>
+        <td style="text-align:right" class="num">${formatNumberITDisplay(m.carryIn)}</td>
+        <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.gross)}</td>
+        <td style="text-align:center">${f24InputHtml}</td>
+        <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.running)}</td>
+        <td style="text-align:center">${badgeClosed}</td>
+        <td style="text-align:center">${m.nAcq}</td>
+        <td style="text-align:center">${m.nVen}</td>
+      `;
+      
+      tbody.appendChild(tr);
+
+      totCredito += m.ivaAcq;
+      totDebito += m.ivaVen;
+      totSaldo += m.saldoIva;
+      lastVisibleRunning = m.running;
+    });
+
+    // Aggiungi event listener per gli input F24
+    tbody.querySelectorAll(".vat-f24-input").forEach(input => {
+      input.addEventListener("change", (e) => {
+        const monthKey = e.target.dataset.month;
+        let amount = parseFloat(e.target.value) || 0;
+        
+        // Clamp a 0 minimo
+        if (amount < 0) amount = 0;
+        
+        // Trova il gross del mese per clamp max
+        const monthData = months.find(m => m.mese === monthKey);
+        if (monthData && monthData.gross > 0) {
+          amount = Math.min(amount, monthData.gross);
+        }
+        
+        setMonthF24Paid(monthKey, amount);
+        renderVatTableComplete(); // Re-render per ricalcolare
+      });
+    });
+
+    // Aggiorna KPI
+    if (elCredito) elCredito.textContent = "€ " + formatNumberITDisplay(totCredito);
+    if (elDebito) elDebito.textContent = "€ " + formatNumberITDisplay(totDebito);
+    // Mostra sia saldo periodo che residuo attuale
+    if (elSaldo) {
+      elSaldo.innerHTML = `
+        <div style="font-size:0.85em; opacity:0.7;">Saldo periodo: € ${formatNumberITDisplay(totSaldo)}</div>
+        <div>Residuo attuale: € ${formatNumberITDisplay(lastVisibleRunning)}</div>
+      `;
+    }
+
+    // Aggiorna status step
+    const stepWarn = document.getElementById("vatStepWarn");
+    if (stepWarn) {
+      const hasWarnings = months.some(m => m.nAcq === 0 || m.nVen === 0);
+      stepWarn.textContent = hasWarnings ? "⚠️ Warning presenti" : "✅ OK";
+    }
+
+    // Aggiorna status caricamenti
+    const stepAcq = document.getElementById("vatStepAcq");
+    const stepVen = document.getElementById("vatStepVen");
+    if (stepAcq) stepAcq.textContent = lastAdeRecords.length > 0 ? "✅ Caricato" : "⏳ Attendere";
+    if (stepVen) stepVen.textContent = lastAdeSalesRecords.length > 0 ? "✅ Caricato" : "⚠️ Mancante";
+  }
+
+  /**
+   * Export prospetto IVA completo
+   */
+  function exportVatProspectComplete() {
+    const months = computeMonthlyVatComplete();
+    
+    if (!months.length) {
+      alert("Nessun dato da esportare.");
+      return;
+    }
+
+    const header = "Mese;IVA Credito (Acquisti);IVA Debito (Vendite);Saldo IVA;Riporto da prec.;Posizione prima F24;F24 Versato;Residuo;Chiusa;N. Doc Acquisti;N. Doc Vendite\n";
+    const rows = months.map(m => 
+      `${monthLabelFromKey(m.mese)};${m.ivaAcq.toFixed(2)};${m.ivaVen.toFixed(2)};${m.saldoIva.toFixed(2)};${m.carryIn.toFixed(2)};${m.gross.toFixed(2)};${m.f24Paid.toFixed(2)};${m.running.toFixed(2)};${m.paid ? 'SI' : 'NO'};${m.nAcq};${m.nVen}`
+    ).join("\n");
+    
+    const csv = header + rows;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "liquidazione_iva_completa.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // Event listener toggle modalità IVA
+  const vatModeAcquisti = document.getElementById("vatModeAcquisti");
+  const vatModeCompleta = document.getElementById("vatModeCompleta");
+  const vatKpiContainer = document.getElementById("vatKpiContainer");
+  const vatKpiContainerOld = document.getElementById("vatKpiContainerOld");
+
+  if (vatModeAcquisti) {
+    vatModeAcquisti.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        // Mostra solo KPI acquisti (vecchia modalità)
+        if (vatKpiContainer) vatKpiContainer.style.display = "none";
+        if (vatKpiContainerOld) vatKpiContainerOld.style.display = "flex";
+        
+        // Cambia header tabella
+        const headerAcq = document.getElementById("vatHeaderAcquisti");
+        const headerComp = document.getElementById("vatHeaderCompleta");
+        if (headerAcq) headerAcq.style.display = "";
+        if (headerComp) headerComp.style.display = "none";
+        
+        renderVatLiquidation();
+      }
+    });
+  }
+
+  if (vatModeCompleta) {
+    vatModeCompleta.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        // Mostra KPI completi
+        if (vatKpiContainer) vatKpiContainer.style.display = "flex";
+        if (vatKpiContainerOld) vatKpiContainerOld.style.display = "none";
+        
+        // Cambia header tabella
+        const headerAcq = document.getElementById("vatHeaderAcquisti");
+        const headerComp = document.getElementById("vatHeaderCompleta");
+        if (headerAcq) headerAcq.style.display = "none";
+        if (headerComp) headerComp.style.display = "";
+        
+        renderVatTableComplete();
+      }
+    });
+  }
+
   // Listener per aggiornare la tabella quando si clicca sul TAB
   const btnVatTab = document.querySelector('.nav-tab[data-section="section-vat"]');
   if (btnVatTab) {
     btnVatTab.addEventListener("click", () => {
-       renderVatLiquidation();
+      // Verifica quale modalità è attiva
+      const modeCompleta = vatModeCompleta && vatModeCompleta.checked;
+      if (modeCompleta) {
+        renderVatTableComplete();
+      } else {
+        renderVatLiquidation();
+      }
+    });
+  }
+
+  // Opening Balance input
+  const vatOpeningBalance = document.getElementById("vatOpeningBalance");
+  if (vatOpeningBalance) {
+    // Carica valore iniziale
+    const state = loadVatState();
+    vatOpeningBalance.value = state.openingBalance || 0;
+    
+    vatOpeningBalance.addEventListener("change", (e) => {
+      const amount = parseFloat(e.target.value) || 0;
+      setOpeningBalance(amount);
+      renderVatTableComplete();
+    });
+  }
+
+  // Reset button
+  const btnVatResetPayments = document.getElementById("btnVatResetPayments");
+  if (btnVatResetPayments) {
+    btnVatResetPayments.addEventListener("click", () => {
+      if (confirm("Confermi di voler azzerare tutti i versamenti F24 e il riporto iniziale?")) {
+        resetVatState();
+        if (vatOpeningBalance) vatOpeningBalance.value = 0;
+        renderVatTableComplete();
+      }
+    });
+  }
+
+  // Checkbox mostra mesi chiusi
+  const chkShowClosedMonths = document.getElementById("chkShowClosedMonths");
+  if (chkShowClosedMonths) {
+    chkShowClosedMonths.addEventListener("change", () => {
+      renderVatTableComplete();
     });
   }
 
@@ -6469,46 +8263,55 @@ function renderPeriodKpi(results) {
   const btnExportVat = document.getElementById("btnExportVat");
   if (btnExportVat) {
     btnExportVat.addEventListener("click", () => {
-      if (!lastAdeRecords || !lastAdeRecords.length) {
-        alert("Nessun dato da esportare.");
-        return;
+      // Verifica quale modalità è attiva
+      const modeCompleta = vatModeCompleta && vatModeCompleta.checked;
+      
+      if (modeCompleta) {
+        // Export modalità completa (Acquisti + Vendite)
+        exportVatProspectComplete();
+      } else {
+        // Export modalità solo acquisti (esistente)
+        if (!lastAdeRecords || !lastAdeRecords.length) {
+          alert("Nessun dato da esportare.");
+          return;
+        }
+
+        const lsBasisKey = "contaibl-vat-date-basis";
+        const lsPrevKey  = "contaibl-vat-include-prev-year";
+
+        let basis = (localStorage.getItem(lsBasisKey) || "RICEZIONE").toUpperCase();
+        const selBasis = document.getElementById("vatDateBasis");
+        if (selBasis) basis = String(selBasis.value || basis).toUpperCase();
+
+        let includePrevYear = localStorage.getItem(lsPrevKey) === "true";
+        const cb = document.getElementById("vatIncludePrevYear");
+        if (cb) includePrevYear = cb.checked;
+
+        const vat = buildVatGroups(lastAdeRecords, basis, includePrevYear);
+
+        if (!vat.keys.length) {
+          alert("Nessun record nel perimetro selezionato.");
+          return;
+        }
+
+        // CSV
+        let csv = "Periodo (Mese);N. Fatture;Imponibile;IVA;Totale Fattura\n";
+        vat.keys.forEach(key => {
+          const g = vat.groups[key];
+          csv += `${monthLabelFromKey(key)};${g.count};${formatNumberITDisplay(g.imp)};${formatNumberITDisplay(g.iva)};${formatNumberITDisplay(g.tot)}\n`;
+        });
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const yearSuffix = vat.targetYear ? String(vat.targetYear) : "export";
+        a.download = `liquidazione_iva_${yearSuffix}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       }
-
-      const lsBasisKey = "contaibl-vat-date-basis";
-      const lsPrevKey  = "contaibl-vat-include-prev-year";
-
-      let basis = (localStorage.getItem(lsBasisKey) || "RICEZIONE").toUpperCase();
-      const selBasis = document.getElementById("vatDateBasis");
-      if (selBasis) basis = String(selBasis.value || basis).toUpperCase();
-
-      let includePrevYear = localStorage.getItem(lsPrevKey) === "true";
-      const cb = document.getElementById("vatIncludePrevYear");
-      if (cb) includePrevYear = cb.checked;
-
-      const vat = buildVatGroups(lastAdeRecords, basis, includePrevYear);
-
-      if (!vat.keys.length) {
-        alert("Nessun record nel perimetro selezionato.");
-        return;
-      }
-
-      // CSV
-      let csv = "Periodo (Mese);N. Fatture;Imponibile;IVA;Totale Fattura\n";
-      vat.keys.forEach(key => {
-        const g = vat.groups[key];
-        csv += `${monthLabelFromKey(key)};${g.count};${formatNumberITDisplay(g.imp)};${formatNumberITDisplay(g.iva)};${formatNumberITDisplay(g.tot)}\n`;
-      });
-
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const yearSuffix = vat.targetYear ? String(vat.targetYear) : "export";
-      a.download = `liquidazione_iva_${yearSuffix}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
     });
   }
 
