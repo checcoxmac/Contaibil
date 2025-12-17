@@ -1242,9 +1242,21 @@ function formatDateForUI(dateObj) {
       const btnOk     = document.getElementById("btnGestMapOk");
       const btnCancel = document.getElementById("btnGestMapCancel");
 
-      // Aggiorna il titolo del modale dinamicamente
-      if (modalTitle) {
-        modalTitle.textContent = `Aggancio colonne per ${fileDescription || 'file gestionale'}`;
+      // Aggiorna titolo e helper in base a mappingKey
+      if (mappingKey === "GEST_C") {
+        if (modalTitle) {
+          modalTitle.textContent = "Aggancio colonne Note di Credito (File C)";
+        }
+        if (helper) {
+          helper.textContent = "File Note di Credito (NC): mapping separato dal File B. Obbligatori: Numero documento, Data, Totale oppure (Imponibile + IVA).";
+        }
+      } else {
+        if (modalTitle) {
+          modalTitle.textContent = "Aggancio colonne Gestionale (File B)";
+        }
+        if (helper) {
+          helper.textContent = "Obbligatori: Numero documento, Data, Totale oppure (Imponibile + IVA).";
+        }
       }
 
       // config attuale (se già salvata in learningData.columns.<KEY>)
@@ -4358,7 +4370,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     }
 
     document.getElementById("summaryRow").style.display = "flex";
-    document.getElementById("filterRow").style.display = "flex";
+    document.getElementById("tableToolbar").style.display = "block";
     document.getElementById("tableContainer").style.display = "block";
 
         const total = full.filter(r => !r.deleted).length;
@@ -4669,6 +4681,28 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     return null;
   }
 
+  // Scroll smooth to element
+  function scrollToEl(el) {
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Setup stepper navigation
+  function setupStepperNavigation() {
+    if (!stepperEl) return;
+    stepNodes.forEach((node, idx) => {
+      node.style.cursor = "pointer";
+      node.addEventListener("click", () => {
+        const stepNum = parseInt(node.dataset.step);
+        if (stepNum === 1) scrollToEl(document.getElementById("fileA"));
+        else if (stepNum === 2) scrollToEl(document.getElementById("gestMapBackdrop")?.parentElement || document.querySelector(".card"));
+        else if (stepNum === 3) scrollToEl(btnMatch);
+        else if (stepNum === 4) scrollToEl(document.getElementById("resultTable"));
+        else if (stepNum === 5) scrollToEl(document.getElementById("btnExportFiltered") || document.getElementById("btnExportAll"));
+      });
+    });
+  }
+
   function refreshMatchButtonState() {
     if (!btnMatch) return;
     const reason = computeBlockingReason();
@@ -4708,6 +4742,17 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       step4Done ? "Correzioni salvate" : "Correggi / conferma i match");
     setStepState(5, step5Done ? "completed" : (step3Done ? "active" : "disabled"),
       step5Done ? "Esportazione completata" : "Esporta i risultati");
+
+    // Highlight mapping requirement if files loaded but mapping not confirmed
+    const mappingSection = document.getElementById("gestMapBackdrop")?.parentElement;
+    if (mappingSection) {
+      const needsAttention = step1Done && !step2Done;
+      if (needsAttention) {
+        mappingSection.classList.add("needs-attention");
+      } else {
+        mappingSection.classList.remove("needs-attention");
+      }
+    }
   }
 
   function refreshFlowUI() {
@@ -6752,5 +6797,8 @@ function renderPeriodKpi(results) {
       });
     });
   }
+
+  // Setup stepper navigation (click to scroll)
+  setupStepperNavigation();
 
 });

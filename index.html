@@ -57,7 +57,11 @@
       <div class="topbar-nav">
         <button class="nav-tab main-tab-label active" data-section="section-recon">
           <span class="nav-pill">●</span>
-          Riconciliazione ADE / Gestionale
+          Riconciliazione Acquisti
+        </button>
+        <button class="nav-tab" data-section="section-sales">
+          <span class="nav-pill">🆕</span>
+          Riconciliazione Vendite (Beta)
         </button>
         <button class="nav-tab" data-section="section-analysis">
           Analisi fornitori (ADE)
@@ -80,6 +84,28 @@
         <div class="main">
           <!-- SIDE COLUMN: FILE INPUTS -->
           <div class="col-side">
+            <!-- QUICK START GUIDE -->
+            <details class="card quickstart-card" open>
+              <summary class="card-header quickstart-header">
+                <div>
+                  <div class="card-title">
+                    <span class="emoji">🚀</span>
+                    Guida rapida - 5 step
+                  </div>
+                </div>
+              </summary>
+              <div class="quickstart-body">
+                <ol class="quickstart-list">
+                  <li><strong>Carica i file</strong> — Trascina CSV/XLSX di ADE (A) e Gestionale (B)</li>
+                  <li><strong>Verifica il mapping</strong> — Controlla che le colonne siano giuste</li>
+                  <li><strong>Confronta fatture</strong> — Clicca "Confronta fatture" per matchare</li>
+                  <li><strong>Rivedi i risultati</strong> — Correggi manualmente gli errori nella tabella</li>
+                  <li><strong>Esporta</strong> — Scarica il CSV riconciliato</li>
+                </ol>
+                <div class="quickstart-tip">💡 <strong>Tip:</strong> Clicca sui numeri dello stepper per navigare tra le sezioni</div>
+              </div>
+            </details>
+
             <div class="card">
               <div class="card-header">
                 <div>
@@ -139,21 +165,21 @@
                 </button>
               </div>
             </div>
-            <!-- CARD · APPRENDIMENTO CONTAIBIL -->
-    <div class="card learning-card">
-      <div class="card-header">
+            <!-- CARD · APPRENDIMENTO CONTAIBIL (COLLASSABILE) -->
+    <details class="card learning-card">
+      <summary class="card-header learning-card-summary">
         <div>
           <div class="card-title learning-title-row">
-            <span class="emoji">🧠</span>
-            <span>Procedure azienda / Apprendimento</span>
+            <span class="emoji">⚙️</span>
+            <span>Impostazioni avanzate</span>
             <span class="learning-dot"></span>
           </div>
           <div class="card-subtitle">
-            Regole che ContAIbil impara dalle tue correzioni sui match.
+            Procedure azienda / Apprendimento (Procedure che ContAIbil impara automaticamente)
           </div>
         </div>
         <div class="badge-soft learning-badge">Auto-learning</div>
-      </div>
+      </summary>
 
       <div class="learning-body">
         <textarea
@@ -179,7 +205,7 @@
           Puoi esportare il file JSON e riutilizzarlo su altri clienti o periodi.
         </div>
       </div>
-    </div> <!-- fine learning-card -->
+    </details> <!-- fine learning-card -->
   </div> <!-- fine col-side -->
 
           <!-- MAIN COLUMN: ACTIONS + TABLE -->
@@ -229,19 +255,6 @@
                      <span class="btn-icon">⚙️</span>
                      Confronta fatture
                    </button>
-                   
-                   <div class="export-group">
-                     <div class="export-label">Esportazioni:</div>
-                     <button id="btnExportFiltered" class="btn btn-secondary btn-highlight" disabled title="Esporta solo le righe attualmente visibili in tabella (filtrate)">
-                       <span class="btn-icon">👁️</span>
-                       VISTA ATTUALE
-                     </button>
-                     <div class="vr-separator"></div>
-                     <button id="btnExportAll" class="btn btn-tertiary" disabled>Tutti</button>
-                     <button id="btnExportAde" class="btn btn-tertiary" disabled>Solo ADE</button>
-                     <button id="btnExportGest" class="btn btn-tertiary" disabled>Solo Gest</button>
-                     <button id="btnExportFix" class="btn btn-tertiary" disabled>Solo Fix</button>
-                   </div>
                  </div>
                  
                  <div class="actions-right">
@@ -296,57 +309,7 @@
                   </div>
                 </div>
               </div>
-
-              <div class="filter-row" id="filterRow" style="display:none;">
-                <button class="filter-btn active" data-filter="ALL">Tutti</button>
-                <button class="filter-btn" data-filter="MATCH_OK">Match OK</button>
-                <button class="filter-btn" data-filter="MATCH_FIX">Da correggere</button>
-                <button class="filter-btn" data-filter="SOLO_ADE">Solo ADE</button>
-                <button class="filter-btn" data-filter="SOLO_GEST">Solo Gestionale</button>
-              </div>
             </div>
-
-            <!-- FILTRI AVANZATI: MESE ADE + FORNITORE -->
-  <div class="advanced-filter-row"
-     id="advancedFilterRow"
-     style="display:none; margin-top: 8px; gap:12px; flex-wrap:wrap; align-items:center;">
-  <div style="font-size:12px; opacity:0.8;">Filtri aggiuntivi:</div>
-
-  <!-- Filtro mese ADE -->
-  <div>
-    <label for="monthFilter" style="font-size:12px; opacity:0.8; display:block;">Mese (data ADE)</label>
-    <select id="monthFilter" style="min-width: 200px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:#020617; color:#e5e7eb;">
-      <option value="">Tutti i mesi ADE</option>
-      <!-- le altre opzioni vengono riempite da logic.js -->
-    </select>
-  </div>
-
-  <!-- Filtro fornitore -->
-  <div>
-    <label for="supplierFilterInput" style="font-size:12px; opacity:0.8; display:block;">Fornitore (denominazione o P.IVA)</label>
-    <input id="supplierFilterInput"
-           type="text"
-           placeholder="Es. WIND, 1337820152..."
-           style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:#020617; color:#e5e7eb;">
-  </div>
-
-  <!-- Filtro numero fattura -->
-  <div>
-    <label for="filterInvoice" style="font-size:12px; opacity:0.8; display:block;">Numero fattura (ADE o Gestionale)</label>
-    <input id="filterInvoice"
-           type="text"
-           placeholder="Es. 921933, 73/2025, 001234..."
-           style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:#020617; color:#e5e7eb;">
-  </div>
-
-  <!-- Pulsante per azzerare i filtri -->
-  <button type="button"
-          id="btnClearFilters"
-          class="btn btn-tertiary"
-          style="font-size:12px; padding:4px 10px; margin-top:16px;">
-    ⟳ Pulisci filtri
-  </button>
-</div>
 
             <div class="table-card">
               <div class="table-header">
@@ -358,6 +321,75 @@
                    ⤢ Modalità Estesa
                  </button>
                </div>
+
+              <!-- TOOLBAR STICKY: FILTRI + EXPORT -->
+              <div class="table-toolbar" id="tableToolbar" style="display:none;">
+                <!-- Export buttons -->
+                <div class="toolbar-section export-section">
+                  <div class="export-label">Esportazioni:</div>
+                  <button id="btnExportFiltered" class="btn btn-secondary btn-highlight" disabled title="Esporta solo le righe attualmente visibili in tabella (filtrate)">
+                    <span class="btn-icon">👁️</span>
+                    VISTA ATTUALE
+                  </button>
+                  <div class="vr-separator"></div>
+                  <button id="btnExportAll" class="btn btn-tertiary" disabled>Tutti</button>
+                  <button id="btnExportAde" class="btn btn-tertiary" disabled>Solo ADE</button>
+                  <button id="btnExportGest" class="btn btn-tertiary" disabled>Solo Gest</button>
+                  <button id="btnExportFix" class="btn btn-tertiary" disabled>Solo Fix</button>
+                </div>
+
+                <!-- Filtri stato -->
+                <div class="toolbar-section filter-section">
+                  <div class="filter-row" id="filterRow">
+                    <button class="filter-btn active" data-filter="ALL">Tutti</button>
+                    <button class="filter-btn" data-filter="MATCH_OK">Match OK</button>
+                    <button class="filter-btn" data-filter="MATCH_FIX">Da correggere</button>
+                    <button class="filter-btn" data-filter="SOLO_ADE">Solo ADE</button>
+                    <button class="filter-btn" data-filter="SOLO_GEST">Solo Gestionale</button>
+                  </div>
+                </div>
+
+                <!-- Filtri avanzati -->
+                <div class="toolbar-section advanced-filter-section">
+                  <div class="advanced-filter-row" id="advancedFilterRow">
+                    <div style="font-size:12px; opacity:0.8;">Filtri aggiuntivi:</div>
+
+                    <!-- Filtro mese ADE -->
+                    <div>
+                      <label for="monthFilter" style="font-size:12px; opacity:0.8; display:block;">Mese (data ADE)</label>
+                      <select id="monthFilter" style="min-width: 200px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:var(--sys-bg-shell); color:var(--sys-text-primary);">
+                        <option value="">Tutti i mesi ADE</option>
+                      </select>
+                    </div>
+
+                    <!-- Filtro fornitore -->
+                    <div>
+                      <label for="supplierFilterInput" style="font-size:12px; opacity:0.8; display:block;">Fornitore (denominazione o P.IVA)</label>
+                      <input id="supplierFilterInput"
+                            type="text"
+                            placeholder="Es. WIND, 1337820152..."
+                            style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:var(--sys-bg-shell); color:var(--sys-text-primary);">
+                    </div>
+
+                    <!-- Filtro numero fattura -->
+                    <div>
+                      <label for="filterInvoice" style="font-size:12px; opacity:0.8; display:block;">Numero fattura (ADE o Gestionale)</label>
+                      <input id="filterInvoice"
+                            type="text"
+                            placeholder="Es. 921933, 73/2025, 001234..."
+                            style="min-width: 240px; padding:4px 8px; border-radius:6px; border:1px solid rgba(148,163,184,0.4); background:var(--sys-bg-shell); color:var(--sys-text-primary);">
+                    </div>
+
+                    <!-- Pulsante per azzerare i filtri -->
+                    <button type="button"
+                            id="btnClearFilters"
+                            class="btn btn-tertiary"
+                            style="font-size:12px; padding:4px 10px; margin-top:16px;">
+                      ⟳ Pulisci filtri
+                    </button>
+                  </div>
+                </div>
+              </div>
  
               <div class="table-wrapper" id="tableContainer" style="display:none;">
                 <table id="resultTable">
@@ -395,6 +427,33 @@
               <div class="footer-note">
                 Puoi cliccare sulle righe con stato <strong>MATCH_FIX</strong> o <strong>SOLO GESTIONALE</strong> per correggere i dati del gestionale, oppure eliminare la parte gestionale con il cestino.
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SEZIONE 1B: RICONCILIAZIONE VENDITE (BETA) -->
+      <div class="section" id="section-sales">
+        <div class="placeholder-wrapper">
+          <div class="placeholder-card">
+            <div class="placeholder-tag">
+              <span>🚧</span>
+              In sviluppo - Beta
+            </div>
+            <div class="placeholder-title">Riconciliazione Vendite</div>
+            <div class="placeholder-subtitle">
+              Funzionalità in fase di implementazione. Permette di riconciliare le fatture di vendita tra ADE e gestionale.
+            </div>
+            <div class="placeholder-list">
+              <li>File A: Fatture elettroniche vendita da Sistema di Interscambio (SDI)</li>
+              <li>File B: Fatture vendita da gestionale</li>
+              <li>File C: Note di credito vendita (opzionale)</li>
+              <li>Stesso algoritmo di matching della riconciliazione acquisti</li>
+              <li>Export riconciliazione + liquidazione IVA vendite</li>
+            </div>
+            <div style="margin-top: 16px; padding: 12px; background: rgba(0,122,255,0.1); border-left: 3px solid var(--sys-tint-blue); border-radius: 8px; font-size: 0.85rem;">
+              <strong>💡 Nota tecnica:</strong> L'implementazione completa richiede un refactoring del codice esistente per supportare workspaces multipli. 
+              Per ora, puoi utilizzare la riconciliazione acquisti come riferimento.
             </div>
           </div>
         </div>
@@ -598,7 +657,7 @@
         <!-- Popup mapping colonne GESTIONALE -->
 <div id="gestMapBackdrop" class="modal-backdrop hidden">
   <div class="modal-panel">
-    <h3 id="gestMapTitle">Aggancio colonne gestionale (File B)</h3>
+    <h3 id="gestMapTitle">Aggancio colonne (File B / File C)</h3>
     <p>
       Seleziona per ogni campo ContAIbil la colonna corretta del file
       (Mexal/Contel). Puoi salvarla nelle procedure così non dovrai rifarlo ogni volta.

@@ -446,6 +446,12 @@ body {
   color: var(--sys-tint-green);
 }
 
+/* Attenzione: mapping obbligatorio */
+.needs-attention {
+  border: 1px solid rgba(0, 122, 255, 0.55) !important;
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.12) !important;
+}
+
 /* --- COMPACT / EXCEL-LIKE MODE --- */
 body.compact-mode .app-container {
   max-width: 95vw;
@@ -906,11 +912,15 @@ tr.status-manual-match td {
   color: #e0e0e0;
 }
 
-/* Hover universale */
-tr:hover td {
-  background-color: #3b82f6 !important; /* Blu acceso selezione */
-  color: white !important;
+/* Hover non distruttivo: non sovrascrive gli stati colorati */
+tbody tr:hover td {
   cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(59,130,246,0.45);
+}
+
+/* Solo per righe "neutre" (senza stato) aggiungo una leggera tinta */
+tbody tr:not([class*="status-"]):hover td {
+  background: rgba(59,130,246,0.06);
 }
 
 tbody tr:hover td .status-pill {
@@ -1835,6 +1845,97 @@ button[disabled][data-disabled-reason]:hover::after {
 }
 
 /* =========================================
+   Quick Start Guide
+   ========================================= */
+
+details.quickstart-card {
+  margin-bottom: 12px;
+}
+
+.quickstart-header {
+  cursor: pointer;
+  user-select: none;
+  padding: 10px 12px !important;
+}
+
+.quickstart-header:hover {
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.quickstart-body {
+  padding: 12px 10px;
+  border-top: 1px solid var(--sys-separator);
+}
+
+.quickstart-list {
+  list-style-position: inside;
+  font-size: 0.82rem;
+  color: var(--sys-text-primary);
+  padding: 0;
+  margin: 0 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quickstart-list li {
+  margin: 0;
+  padding: 0;
+  line-height: 1.3;
+}
+
+.quickstart-tip {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 122, 255, 0.08);
+  border-left: 2px solid var(--sys-tint-blue);
+  font-size: 0.78rem;
+  color: var(--sys-text-secondary);
+}
+
+/* Support for details/summary */
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::before {
+  content: "▼";
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 0.8rem;
+  color: var(--sys-text-secondary);
+  transition: transform 0.2s ease;
+}
+
+details[open] summary::before {
+  transform: rotate(-180deg);
+}
+
+/* Learning card as details */
+details.learning-card {
+  margin-top: 12px;
+  position: relative;
+  overflow: hidden;
+  animation: learning-fade-in 0.35s ease-out;
+}
+
+.learning-card-summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 10px 12px !important;
+  margin-bottom: 0 !important;
+}
+
+.learning-card-summary:hover {
+  background: rgba(0, 122, 255, 0.04);
+}
+
+/* =========================================
    Pannello apprendimento ContAIbil
    ========================================= */
 
@@ -2181,11 +2282,95 @@ html[data-theme="dark"] .loading-overlay {
 .kpi-label { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .kpi-value { font-size: 1.5rem; font-weight: bold; color: #fff; margin-top: 5px; }
 
+/* --- TOOLBAR STICKY (FILTRI + EXPORT) --- */
+.table-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(25px) saturate(180%);
+  -webkit-backdrop-filter: blur(25px) saturate(180%);
+  border-bottom: 1px solid var(--sys-separator);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar-section.export-section {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--sys-separator);
+}
+
+.toolbar-section .filter-row {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.toolbar-section .advanced-filter-row {
+  display: flex;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--sys-bg-content-alt);
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+}
+
+.export-label {
+  font-size: 0.78rem;
+  color: var(--sys-text-secondary);
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.vr-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--sys-separator);
+  margin: 0 4px;
+}
+
+/* Responsive toolbar */
+@media (max-width: 960px) {
+  .table-toolbar {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  
+  .toolbar-section {
+    width: 100%;
+  }
+  
+  .toolbar-section.export-section {
+    flex-direction: column;
+    align-items: stretch;
+    border-bottom: 1px solid var(--sys-separator);
+    padding-bottom: 8px;
+  }
+  
+  .toolbar-section.export-section .btn {
+    width: 100%;
+  }
+}
+
 /* --- TABELLA EXCEL-STYLE --- */
 /* --- TABELLA CHIURGICA (FIX DEFINITIVO) --- */
 .table-wrapper {
     width: 100%;
-    max-height: calc(100vh - 320px); /* Massimizza spazio: viewport - header/filtri */
+    max-height: calc(100vh - 420px); /* Aumentato per compensare toolbar sticky */
     overflow: auto; /* Scroll sia orizzontale che verticale */
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -2343,10 +2528,14 @@ tbody td {
     background-color: var(--sys-bg-content); /* Nero non assoluto */
 }
 
-/* Hover riga molto evidente */
+/* Hover riga coerente con sezione riconciliazione */
 tbody tr:hover td {
-    background-color: var(--sys-bg-elevated) !important; /* Grigio scuro su hover */
-    color: var(--sys-text-primary) !important;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(59,130,246,0.45);
+}
+
+tbody tr:not([class*="status-"]):hover td {
+    background: rgba(59,130,246,0.06);
 }
 
 /* --- SPECIFICO PER SEZIONE LIQUIDAZIONE (Tabella minuscola risolta) --- */
