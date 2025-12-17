@@ -153,6 +153,15 @@ html[data-theme="dark"] {
   gap: 8px;
 }
 
+.mapping-helper-text {
+  font-size: 0.82rem;
+  margin: 6px 0 10px;
+  color: var(--sys-text-secondary);
+}
+.mapping-helper-text.error {
+  color: var(--sys-tint-red);
+}
+
 .modal-actions .primary {
   background: var(--sys-tint-blue);
   color: var(--sys-text-inverted);
@@ -379,6 +388,62 @@ body {
   max-width: 100%;
   width: 100%;
   padding: 16px 24px 18px;
+}
+
+/* FLOW STEPPER */
+.flow-stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--sys-separator);
+  border-radius: 10px;
+  background: var(--sys-bg-content-alt);
+  transition: all 0.2s ease;
+}
+
+.flow-step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: var(--sys-bg-content);
+  border: 1px solid var(--sys-separator);
+}
+
+.flow-step-title {
+  font-weight: 650;
+  font-size: 0.9rem;
+}
+
+.flow-step-desc {
+  font-size: 0.78rem;
+  color: var(--sys-text-secondary);
+}
+
+.flow-step.disabled { opacity: 0.5; }
+.flow-step.active {
+  border-color: var(--sys-tint-blue);
+  background: rgba(0, 122, 255, 0.08);
+}
+.flow-step.active .flow-step-circle { border-color: var(--sys-tint-blue); color: var(--sys-tint-blue); }
+.flow-step.completed {
+  border-color: var(--sys-tint-green);
+  background: rgba(52, 199, 89, 0.08);
+}
+.flow-step.completed .flow-step-circle {
+  border-color: var(--sys-tint-green);
+  background: var(--pill-ok-bg);
+  color: var(--sys-tint-green);
 }
 
 /* --- COMPACT / EXCEL-LIKE MODE --- */
@@ -1305,6 +1370,27 @@ tr.match-source-row td {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Tooltip per motivi di blocco pulsanti */
+button[disabled][data-disabled-reason] {
+  position: relative;
+}
+button[disabled][data-disabled-reason]:hover::after {
+  content: attr(data-disabled-reason);
+  position: absolute;
+  bottom: 110%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.82);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
 }
 .btn-danger {
   background: var(--pill-ade-bg);

@@ -94,6 +94,20 @@ window.addEventListener("DOMContentLoaded", () => {
   let originalResults = null;
   let undoStack = [];
 
+  // Stato flusso guidato / stepper
+  const flowState = {
+    files: { ade: false, gest: false, nc: false },
+    mapping: { gestBConfirmed: false, gestCConfirmed: false },
+    matchDone: false,
+    correctionsDone: false,
+    exportDone: false
+  };
+  const mappingSession = {
+    GEST_B: { confirmed: false, headerSig: null },
+    GEST_C: { confirmed: false, headerSig: null }
+  };
+  const cachedHeaders = { GEST_B: null, GEST_C: null };
+
   const DEFAULT_PROCEDURE_FILENAME = "procedure_STANDARD.json";
 
   // analisi fornitori
@@ -1014,7 +1028,9 @@ function formatDateForUI(dateObj) {
     azienda: "STANDARD",
     columns: {
       ADE: {},
-      GEST: {}
+      GEST: {},       // legacy key (compatibilità)
+      GEST_B: {},     // File B (Gestionale Fatture)
+      GEST_C: {}      // File C (Note Credito)
     },
     rules: [],
     supplierPivaMap: {} // Nuovo: per il recupero P.IVA
@@ -1025,18 +1041,23 @@ function formatDateForUI(dateObj) {
       learningData = {
         versione: 2,
         azienda: "STANDARD",
-        columns: { ADE: {}, GEST: {} },
+        columns: { ADE: {}, GEST: {}, GEST_B: {}, GEST_C: {} },
         rules: []
       };
       if (!learningData.supplierPivaMap) learningData.supplierPivaMap = {}; // Assicurati che la mappa esista
       return;
     }
-    if (!learningData.columns) learningData.columns = { ADE: {}, GEST: {} };
+    if (!learningData.columns) learningData.columns = { ADE: {}, GEST: {}, GEST_B: {}, GEST_C: {} };
     if (!learningData.columns.ADE) learningData.columns.ADE = {};
     if (!learningData.columns.GEST) learningData.columns.GEST = {};
+    if (!learningData.columns.GEST_B) learningData.columns.GEST_B = {};
+    if (!learningData.columns.GEST_C) learningData.columns.GEST_C = {};
+    // migrazione soft: se GEST_B è vuoto ma GEST ha dati, copiali su B per compatibilità
+    if (Object.keys(learningData.columns.GEST_B).length === 0 && Object.keys(learningData.columns.GEST).length > 0) {
+      learningData.columns.GEST_B = { ...learningData.columns.GEST };
+    }
     if (!Array.isArray(learningData.rules)) learningData.rules = [];
     if (!learningData.versione || learningData.versione < 2) {
-      // Se la versione è vecchia, potremmo voler resettare o migrare i dati
       learningData.versione = 2;
     }
   }
@@ -1046,11 +1067,13 @@ function formatDateForUI(dateObj) {
     ensureLearningShape();
     const t = tipo.toUpperCase();
     const base = {
-      num: null, den: null, piva: null, 
+      num: null, den: null, piva: null,
       data: null, dataReg: null, // <--- NUOVO CAMPO
       imp: null, iva: null, tot: null
     };
-    const fromJson = (learningData.columns && learningData.columns[t]) || {};
+    // Priorità: chiave specifica (GEST_B / GEST_C) → legacy GEST → vuoto
+    const columns = learningData.columns || {};
+    const fromJson = columns[t] || (t.startsWith("GEST") ? (columns.GEST_B || columns.GEST || {}) : {});
     return { ...base, ...fromJson };
   }
 
@@ -1060,6 +1083,11 @@ function formatDateForUI(dateObj) {
     const t = tipo.toUpperCase();
     const prev = learningData.columns[t] || {};
     learningData.columns[t] = { ...prev, ...partialCfg };
+    // Mantieni anche la chiave legacy GEST se stai aggiornando B e quella legacy è vuota
+    if (t === "GEST_B") {
+      const legacy = learningData.columns.GEST || {};
+      learningData.columns.GEST = { ...legacy, ...partialCfg };
+    }
     refreshLearningPanel();
   }
 
@@ -1140,6 +1168,40 @@ function formatDateForUI(dateObj) {
     }
   }
 
+  // ---------- Flow helpers (stepper + mapping) ----------
+
+  function headersSignature(headers = []) {
+    return headers.map(h => String(h || "").toLowerCase().trim()).join("|");
+  }
+
+  function markMappingConfirmed(key, headers) {
+    const k = key || "GEST_B";
+    if (!mappingSession[k]) mappingSession[k] = { confirmed: false, headerSig: null };
+    mappingSession[k].confirmed = true;
+    mappingSession[k].headerSig = headersSignature(headers);
+    flowState.mapping[k === "GEST_C" ? "gestCConfirmed" : "gestBConfirmed"] = true;
+  }
+
+  function resetMappingConfirmation(key) {
+    const k = key || "GEST_B";
+    if (!mappingSession[k]) mappingSession[k] = { confirmed: false, headerSig: null };
+    mappingSession[k].confirmed = false;
+    mappingSession[k].headerSig = null;
+    if (k === "GEST_C") {
+      flowState.mapping.gestCConfirmed = false;
+    } else {
+      flowState.mapping.gestBConfirmed = false;
+    }
+  }
+
+  function isMappingConfirmed(key, headers) {
+    const k = key || "GEST_B";
+    const info = mappingSession[k];
+    if (!info || !info.confirmed) return false;
+    if (!headers || !headers.length) return info.confirmed; // se non abbiamo header, fidati dello stato
+    return info.headerSig === headersSignature(headers);
+  }
+
   // ---------- MAPPING MANUALE COLONNE GESTIONALE ----------
 
   function fillSelectWithHeaders(selectEl, headers, preselect) {
@@ -1160,7 +1222,7 @@ function formatDateForUI(dateObj) {
     }
   }
 
-  function openGestMappingModal(headers, fileDescription) {
+  function openGestMappingModal(headers, fileDescription, mappingKey = "GEST_B") {
     return new Promise((resolve, reject) => {
       const backdrop = document.getElementById("gestMapBackdrop");
       if (!backdrop) { resolve({}); return; } // Sicurezza
@@ -1175,6 +1237,8 @@ function formatDateForUI(dateObj) {
       const selIva  = document.getElementById("selGestIva");
       const selTot  = document.getElementById("selGestTot");
 
+      const helper  = document.getElementById("gestMapHelper");
+
       const btnOk     = document.getElementById("btnGestMapOk");
       const btnCancel = document.getElementById("btnGestMapCancel");
 
@@ -1183,8 +1247,8 @@ function formatDateForUI(dateObj) {
         modalTitle.textContent = `Aggancio colonne per ${fileDescription || 'file gestionale'}`;
       }
 
-      // config attuale (se già salvata in learningData.columns.GEST)
-      const cfg = getColumnConfig("GEST");
+      // config attuale (se già salvata in learningData.columns.<KEY>)
+      const cfg = getColumnConfig(mappingKey || "GEST_B");
 
       fillSelectWithHeaders(selNum,  headers, cfg.num);
       fillSelectWithHeaders(selPiva, headers, cfg.piva);
@@ -1201,7 +1265,32 @@ function formatDateForUI(dateObj) {
         btnCancel.onclick = null;
       }
 
+      function validateAndToggle() {
+        const hasNum  = !!selNum.value;
+        const hasData = !!selData.value;
+        const hasTot  = !!selTot.value;
+        const hasImpIva = !!selImp.value && !!selIva.value;
+        const amountsOk = hasTot || hasImpIva;
+        const valid = hasNum && hasData && amountsOk;
+
+        if (btnOk) btnOk.disabled = !valid;
+        if (helper) {
+          helper.textContent = valid
+            ? "Pronto: i campi minimi sono selezionati."
+            : "Obbligatori: Numero documento, Data documento, e Totale oppure (Imponibile + IVA).";
+          helper.classList.toggle("error", !valid);
+        }
+        return valid;
+      }
+
+      [selNum, selData, selImp, selIva, selTot].forEach(sel => {
+        if (sel) sel.addEventListener("change", validateAndToggle);
+      });
+      validateAndToggle();
+
       btnOk.onclick = () => {
+        if (!validateAndToggle()) return;
+
         const newCfg = {
           num:  selNum.value  || null,
           piva: selPiva.value || null,
@@ -1212,14 +1301,16 @@ function formatDateForUI(dateObj) {
           iva:  selIva.value  || null,
           tot:  selTot.value  || null,
         };
-        updateColumnConfig("GEST", newCfg);
+        updateColumnConfig(mappingKey || "GEST_B", newCfg);
         refreshLearningPanel(); // aggiornare il JSON nel box
+        markMappingConfirmed(mappingKey || "GEST_B", headers);
         closeModal();
         resolve(newCfg);
       };
 
       btnCancel.onclick = () => {
         closeModal();
+        resetMappingConfirmation(mappingKey || "GEST_B");
         // se annulli, non cambio nulla
         resolve(null);
       };
@@ -1229,10 +1320,10 @@ function formatDateForUI(dateObj) {
   }
 
   // chiede sempre il mapping prima di usare il gestionale
-  function hasValidGestConfig(headers, fileDescription) {
+  function hasValidGestConfig(headers, fileDescription, mappingKey = "GEST_B") {
     // controlla se le colonne salvate in learningData.columns.GEST
     // esistono davvero nell'header del file caricato
-    const cfg = getColumnConfig("GEST");
+    const cfg = getColumnConfig(mappingKey || "GEST_B");
     if (!cfg) return false;
     
     // Se non ci sono colonne configurate, la config non è valida.
@@ -1242,16 +1333,16 @@ function formatDateForUI(dateObj) {
     const headerSet = new Set(headers || []);
 
     // Campi minimi che vogliamo sicuri per il match. Per le note di credito, la denominazione è meno critica.
-    const requiredKeys = (fileDescription && fileDescription.includes("Note Credito")) ? ["num", "data", "imp"] : ["num", "data", "den", "imp"];
+    const requiredKeys = (fileDescription && fileDescription.includes("Note Credito")) ? ["num", "data", "imp"] : ["num", "data"];
 
-    for (const key of requiredKeys) {
-      // Se una delle chiavi richieste non è nemmeno nel file di configurazione, non è valido.
-      if (!(key in cfg)) return false;
+    // Campi obbligatori: num + data + (tot OR imp+iva)
+    const hasNum = cfg.num && headerSet.has(cfg.num);
+    const hasData = cfg.data && headerSet.has(cfg.data);
+    const hasTot = cfg.tot && headerSet.has(cfg.tot);
+    const hasImpIva = cfg.imp && headerSet.has(cfg.imp) && cfg.iva && headerSet.has(cfg.iva);
+    const amountsOk = hasTot || hasImpIva;
 
-      const colName = cfg[key];
-      if (!colName) return false;            // non configurato
-      if (!headerSet.has(colName)) return false;  // colonna non esiste nel file attuale
-    }
+    if (!hasNum || !hasData || !amountsOk) return false;
 
     return true; // configurazione ok per questi headers
   }
@@ -2194,8 +2285,8 @@ function buildGestAcqRecords(parsed, options = {}) {
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
 
-  // mapping base da JSON (columns.GEST.*)
-  const cfgGest = getColumnConfig("GEST");
+  // mapping base da JSON (columns.GEST_B.*)
+  const cfgGest = getColumnConfig("GEST_B");
 
   // ----------------------------------------------------
   // NUMERO DOCUMENTO / NUMERO FATTURA (GESTIONALE)
@@ -2437,7 +2528,7 @@ function buildGestNcRecords(parsed, options = {}) {
   const H = parsed.headers;
   const h = H.map(x => x.toLowerCase());
 
-  const cfgGest = getColumnConfig("GEST");
+  const cfgGest = getColumnConfig("GEST_C");
 
   // 🔢 NUMERO DOCUMENTO / NUMERO FATTURA NC
   const colNumEst = cfgGest.num || findColGest(H, h, [
@@ -4545,6 +4636,9 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   const btnExportAde = document.getElementById("btnExportAde");
   const btnExportGest = document.getElementById("btnExportGest");
   const btnExportFix = document.getElementById("btnExportFix");
+  const fileInputA = document.getElementById("fileA");
+  const fileInputB = document.getElementById("fileB");
+  const fileInputC = document.getElementById("fileC");
   const statusEl = document.getElementById("statusText");
   const filterButtons = Array.from(document.querySelectorAll(".filter-btn"));
   const btnUndoDelete = document.getElementById("btnUndoDelete");
@@ -4554,6 +4648,126 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   filterInvoiceInput = document.getElementById("filterInvoice");
   const btnClearFilters = document.getElementById("btnClearFilters");
   const advancedFilterRow = document.getElementById("advancedFilterRow");
+
+  const stepperEl = document.getElementById("flowStepper");
+  const stepNodes = stepperEl ? Array.from(stepperEl.querySelectorAll(".flow-step")) : [];
+
+  function setStepState(stepNumber, state, descText) {
+    const node = stepNodes.find(n => n.dataset.step === String(stepNumber));
+    if (!node) return;
+    node.classList.remove("disabled", "active", "completed");
+    node.classList.add(state);
+    const descEl = node.querySelector(".flow-step-desc");
+    if (descEl && descText) descEl.textContent = descText;
+  }
+
+  function computeBlockingReason() {
+    if (!flowState.files.ade) return "Carica il File A (ADE)";
+    if (!flowState.files.gest) return "Carica il File B (Gestionale)";
+    if (!flowState.mapping.gestBConfirmed) return "Mapping colonne File B obbligatorio";
+    if (flowState.files.nc && !flowState.mapping.gestCConfirmed) return "Mapping colonne File C obbligatorio";
+    return null;
+  }
+
+  function refreshMatchButtonState() {
+    if (!btnMatch) return;
+    const reason = computeBlockingReason();
+    const isBlocked = Boolean(reason);
+    btnMatch.disabled = isBlocked;
+    if (reason) {
+      btnMatch.setAttribute("data-disabled-reason", reason);
+      btnMatch.title = reason;
+      if (statusEl && !flowState.matchDone) statusEl.textContent = reason;
+    } else {
+      btnMatch.removeAttribute("data-disabled-reason");
+      btnMatch.title = "Confronta fatture";
+      if (statusEl && !flowState.matchDone) {
+        const current = statusEl.textContent || "";
+        const isPlaceholder = current.trim() === "" || /Carica|Mapping|attesa/i.test(current);
+        if (isPlaceholder) {
+          statusEl.textContent = "Pronto a confrontare le fatture.";
+        }
+      }
+    }
+  }
+
+  function refreshStepper() {
+    const step1Done = flowState.files.ade && flowState.files.gest;
+    const step2Done = flowState.mapping.gestBConfirmed && (!flowState.files.nc || flowState.mapping.gestCConfirmed);
+    const step3Done = flowState.matchDone;
+    const step4Done = flowState.correctionsDone;
+    const step5Done = flowState.exportDone;
+
+    setStepState(1, step1Done ? "completed" : (flowState.files.ade || flowState.files.gest ? "active" : "disabled"),
+      step1Done ? "File ADE e Gestionale caricati" : "Carica ADE (A) e Gestionale (B)");
+    setStepState(2, step2Done ? "completed" : (step1Done ? "active" : "disabled"),
+      step2Done ? "Mapping colonne confermato" : "Conferma mapping colonne obbligatorio");
+    setStepState(3, step3Done ? "completed" : (step2Done ? "active" : "disabled"),
+      step3Done ? "Confronto eseguito" : "Esegui il confronto fatture");
+    setStepState(4, step4Done ? "completed" : (step3Done ? "active" : "disabled"),
+      step4Done ? "Correzioni salvate" : "Correggi / conferma i match");
+    setStepState(5, step5Done ? "completed" : (step3Done ? "active" : "disabled"),
+      step5Done ? "Esportazione completata" : "Esporta i risultati");
+  }
+
+  function refreshFlowUI() {
+    refreshMatchButtonState();
+    refreshStepper();
+  }
+
+  async function handleGestFileSelection(inputEl, mappingKey, description) {
+    if (!inputEl) return;
+    const file = inputEl.files && inputEl.files[0];
+    if (mappingKey === "GEST_B") {
+      flowState.files.gest = Boolean(file);
+      resetMappingConfirmation("GEST_B");
+    } else {
+      flowState.files.nc = Boolean(file);
+      resetMappingConfirmation("GEST_C");
+    }
+    flowState.matchDone = false;
+    flowState.correctionsDone = false;
+    flowState.exportDone = false;
+
+    if (!file) {
+      refreshFlowUI();
+      return;
+    }
+
+    try {
+      statusEl.textContent = `Lettura colonne da ${description}...`;
+      const content = await loadTableFromFile(file, false);
+      const parsed = parseCSV(content);
+      cachedHeaders[mappingKey] = parsed.headers;
+      await ensureGestConfigForHeaders(parsed.headers, description, true, mappingKey);
+    } catch (e) {
+      console.error("Errore durante la lettura del file", e);
+      alert(`Errore lettura ${description}: ${e?.message || e}`);
+    }
+
+    refreshFlowUI();
+  }
+
+  // Gestione change input file (step guidati)
+  if (fileInputA) {
+    fileInputA.addEventListener("change", () => {
+      flowState.files.ade = Boolean(fileInputA.files && fileInputA.files[0]);
+      flowState.matchDone = false;
+      flowState.correctionsDone = false;
+      flowState.exportDone = false;
+      refreshFlowUI();
+    });
+  }
+  if (fileInputB) {
+    fileInputB.addEventListener("change", () => {
+      handleGestFileSelection(fileInputB, "GEST_B", "Gestionale Fatture (File B)");
+    });
+  }
+  if (fileInputC) {
+    fileInputC.addEventListener("change", () => {
+      handleGestFileSelection(fileInputC, "GEST_C", "Note Credito (File C)");
+    });
+  }
 
     // --- Eventi filtri avanzati mese / fornitore ---
 
@@ -4719,45 +4933,39 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 
   // ---------- MAPPING AUTOMATICO / MANUALE GESTIONALE ----------
 
-  async function ensureGestConfigForHeaders(headers, fileDescription, forcePopup = false) {
-    // Se forcePopup è true, apri direttamente il modale
+  async function ensureGestConfigForHeaders(headers, fileDescription, forcePopup = false, mappingKey = "GEST_B") {
+    const key = mappingKey || "GEST_B";
+    cachedHeaders[key] = headers || [];
+
+    // Se forcePopup è true, apri direttamente il modale guidato
     if (forcePopup) {
-      const userConfig = await openGestMappingModal(headers, fileDescription);
-      if (!userConfig) {
-        const cfgGest = getColumnConfig("GEST");
-        updateColumnConfig("GEST", cfgGest);
+      const userConfig = await openGestMappingModal(headers, fileDescription, key);
+      if (userConfig) {
+        markMappingConfirmed(key, headers);
+      } else {
+        resetMappingConfirmation(key);
       }
       return;
     }
 
-    // Verifica se già ho una config salvata valida per questi headers
-    if (hasValidGestConfig(headers, fileDescription)) {
-      console.log("✅ Configurazione colonne già salvata e valida, procedo automaticamente");
+    // Verifica se esiste una config valida e già confermata per queste colonne
+    if (hasValidGestConfig(headers, fileDescription, key) && isMappingConfirmed(key, headers)) {
+      console.log("✅ Configurazione colonne confermata e valida, procedo automaticamente");
       return; // già ok, proseguo
     }
 
-    // Tentativo di rilevamento automatico
+    // Tentativo di rilevamento automatico per precompilare il modale
     console.log("🔍 Tentativo rilevamento automatico colonne...");
     const autoConfig = tryAutoDetectGestColumns(headers, fileDescription);
-    
-    // Verifica se il rilevamento automatico ha trovato tutte le colonne necessarie
-    const isNoteCredito = fileDescription && fileDescription.includes("Note Credito");
-    const requiredKeys = isNoteCredito ? ["num", "data", "imp"] : ["num", "data", "den", "imp"];
-    const allFound = requiredKeys.every(key => autoConfig[key]);
+    updateColumnConfig(key, autoConfig);
 
-    if (allFound) {
-      // Tutte le colonne trovate! Salva e procedi
-      console.log("✅ Rilevamento automatico riuscito:", autoConfig);
-      updateColumnConfig("GEST", autoConfig);
-      return;
-    }
-
-    // Rilevamento automatico parziale: chiedi all'utente
-    console.log("⚠️ Rilevamento automatico parziale, apro modale per conferma");
-    const userConfig = await openGestMappingModal(headers, fileDescription);
-    if (!userConfig) {
-      // Utente ha annullato: usa quello che abbiamo rilevato
-      updateColumnConfig("GEST", autoConfig);
+    // Mostra comunque il modale per conferma esplicita (flow guidato)
+    console.log("⚠️ Configurazione da confermare: apro il modale mapping");
+    const userConfig = await openGestMappingModal(headers, fileDescription, key);
+    if (userConfig) {
+      markMappingConfirmed(key, headers);
+    } else {
+      resetMappingConfirmation(key);
     }
   }
 
@@ -4870,6 +5078,13 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 }
 
   btnMatch.addEventListener("click", async () => {
+    const blockReason = computeBlockingReason();
+    if (blockReason) {
+      statusEl.textContent = blockReason + " (step bloccato)";
+      refreshFlowUI();
+      return;
+    }
+
     statusEl.textContent = "Click rilevato, inizio lettura file...";
     const fA = document.getElementById("fileA").files[0];
     const fB = document.getElementById("fileB").files[0];
@@ -4897,12 +5112,12 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       const parsedB = parseCSV(txtB);
       const parsedC = fC ? parseCSV(txtC) : { headers: [], rows: [] };
 
-      // 🟦 1) CHIEDO MAPPING PER FILE B
-      await ensureGestConfigForHeaders(parsedB.headers, "Gestionale Fatture (File B)", false);
+      // 🟦 1) CHIEDO MAPPING PER FILE B (bloccante)
+      await ensureGestConfigForHeaders(parsedB.headers, "Gestionale Fatture (File B)", false, "GEST_B");
 
-      // 🟪 1-bis) SE ESISTE FILE C, CHIEDO MAPPING ANCHE PER C
+      // 🟪 1-bis) SE ESISTE FILE C, CHIEDO MAPPING ANCHE PER C (indipendente)
       if (parsedC && parsedC.headers && parsedC.headers.length > 0) {
-        await ensureGestConfigForHeaders(parsedC.headers, "Note Credito (File C)", false);
+        await ensureGestConfigForHeaders(parsedC.headers, "Note Credito (File C)", false, "GEST_C");
       }
 
       // 🟩 2) SOLO ORA costruisco i record
@@ -4995,6 +5210,11 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       btnExportAde.disabled = false;
       btnExportGest.disabled = false;
       btnExportFix.disabled = false;
+
+      flowState.matchDone = true;
+      flowState.correctionsDone = false;
+      flowState.exportDone = false;
+      refreshFlowUI();
     } catch (e) {
       console.error(e);
       statusEl.textContent = "Errore durante il confronto: " + (e && e.message ? e.message : e);
@@ -5015,22 +5235,30 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   btnExportAll.addEventListener("click", () => {
     if (lastResults && lastResults.length) {
       exportToCSV(lastResults, "tutte");
+      flowState.exportDone = true;
+      refreshFlowUI();
     }
   });
 
   btnExportAde.addEventListener("click", () => {
     const subset = lastResults.filter(r => !r.deleted && r.STATUS === "SOLO_ADE");
     exportToCSV(subset, "solo_ADE");
+    flowState.exportDone = true;
+    refreshFlowUI();
   });
 
   btnExportGest.addEventListener("click", () => {
     const subset = lastResults.filter(r => !r.deleted && r.STATUS === "SOLO_GEST");
     exportToCSV(subset, "solo_GEST");
+    flowState.exportDone = true;
+    refreshFlowUI();
   });
 
   btnExportFix.addEventListener("click", () => {
     const subset = lastResults.filter(r => !r.deleted && r.STATUS === "MATCH_FIX");
     exportToCSV(subset, "solo_FIX");
+    flowState.exportDone = true;
+    refreshFlowUI();
   });
 
   // Annulla ultimo elimina
@@ -5049,6 +5277,9 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     lastResults = JSON.parse(JSON.stringify(originalResults));
     undoStack = [];
     btnUndoDelete.disabled = true;
+    flowState.correctionsDone = false;
+    flowState.exportDone = false;
+    refreshFlowUI();
     applyFilterAndRender();
   });
 
@@ -5056,7 +5287,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   const btnForceMapB = document.getElementById("btnForceMapB");
   const btnForceMapC = document.getElementById("btnForceMapC");
 
-  async function handleForceMap(fileInputId, fileDescription) {
+  async function handleForceMap(fileInputId, fileDescription, mappingKey = "GEST_B") {
       const fileInput = document.getElementById(fileInputId);
       if (!fileInput || !fileInput.files[0]) {
           alert(`Per forzare il mapping, prima seleziona un file per "${fileDescription}".`);
@@ -5075,8 +5306,12 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
           }
 
           // Chiamiamo la funzione di mapping forzando la comparsa del popup
-          await ensureGestConfigForHeaders(parsed.headers, fileDescription, true);
+          await ensureGestConfigForHeaders(parsed.headers, fileDescription, true, mappingKey);
           statusEl.textContent = `Mapping per "${fileDescription}" aggiornato. Ora puoi premere "Confronta fatture".`;
+          flowState.matchDone = false;
+          flowState.correctionsDone = false;
+          flowState.exportDone = false;
+          refreshFlowUI();
 
       } catch (e) {
           console.error("Errore forzando il mapping:", e);
@@ -5084,8 +5319,8 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       }
   }
 
-  btnForceMapB.addEventListener("click", () => handleForceMap("fileB", "Gestionale Fatture (File B)"));
-  btnForceMapC.addEventListener("click", () => handleForceMap("fileC", "Note Credito (File C)"));
+  btnForceMapB.addEventListener("click", () => handleForceMap("fileB", "Gestionale Fatture (File B)", "GEST_B"));
+  btnForceMapC.addEventListener("click", () => handleForceMap("fileC", "Note Credito (File C)", "GEST_C"));
 
   // ---------- editor: apertura / chiusura / salvataggio ----------
 
@@ -5466,7 +5701,9 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     }
 
     row.matchNote = (editMatchNote.value || "").trim();
-    
+    flowState.correctionsDone = true;
+    flowState.exportDone = false;
+    refreshFlowUI();
     applyFilterAndRender();
     closeEditPanel();
 }
@@ -5488,10 +5725,13 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       // SOLO_GEST → riga eliminata del tutto
       row.deleted = true;
     }
+    flowState.correctionsDone = true;
+    flowState.exportDone = false;
+    refreshFlowUI();
     applyFilterAndRender();
   }
 
-    function bulkApproveMatchesForSupplier(baseRow) {
+    function bulkApproveMatchesForSupplier(baseRow, applyOnlyFix = true) {
     if (!baseRow || !baseRow.ADE || !baseRow.GEST) return;
 
     // chiave fornitore: P.IVA (se c'è) + denominazione normalizzata
@@ -5503,24 +5743,41 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       return;
     }
 
-    // salvo lo stato per poter fare "Annulla ultimo elimina"
+    const candidates = lastResults.filter(r => {
+      if (!r || r.deleted) return false;
+      if (!r.ADE || !r.GEST) return false;
+      const key = (r.ADE.pivaDigits || "") + "|" + (r.ADE.denNorm || "");
+      return key === supplierKey;
+    });
+
+    const matchFixCount = candidates.filter(r => r.STATUS === "MATCH_FIX").length;
+    const messageLines = [
+      `Fornitore: ${baseAde.den || "n/d"} (${baseAde.piva || "n/d"})`,
+      `Righe totali coinvolte: ${candidates.length}`,
+      `Righe in stato MATCH_FIX: ${matchFixCount}`,
+      `Modalità: ${applyOnlyFix ? "Solo righe MATCH_FIX (consigliato)" : "Tutte le righe coerenti"}`
+    ];
+
+    const proceed = confirm(`Conferma azione massiva?\n\n${messageLines.join("\n")}\n\nVuoi procedere con l'approvazione?`);
+    if (!proceed) return;
+
+    // Opzione: includere anche righe non MATCH_FIX (richiesta esplicita)
+    const includeAlsoNonFix = confirm("Vuoi includere anche le righe NON in stato MATCH_FIX? (OK = includi, Annulla = solo MATCH_FIX)");
+    applyOnlyFix = !includeAlsoNonFix;
+
+    // salvo lo stato per poter fare "Annulla ultimo" anche dopo bulk
     undoStack.push(JSON.parse(JSON.stringify(lastResults)));
     btnUndoDelete.disabled = false;
 
     let changedCount = 0;
 
-    for (const r of lastResults) {
+    for (const r of candidates) {
       if (!r || r.deleted) continue;
-      if (r.STATUS !== "MATCH_FIX") continue;
-      if (!r.ADE || !r.GEST) continue;
+      if (applyOnlyFix && r.STATUS !== "MATCH_FIX") continue;
 
       const ade = r.ADE;
       const gest = r.GEST;
 
-      const key = (ade.pivaDigits || "") + "|" + (ade.denNorm || "");
-      if (key !== supplierKey) continue;  // non è lo stesso fornitore
-
-      // Controlli di sicurezza
       const diffTot = Math.abs(ade.tot - gest.tot);
       const totOk = diffTot < 0.05;
 
@@ -5545,11 +5802,14 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     }
 
     applyFilterAndRender();
+    flowState.correctionsDone = true;
+    flowState.exportDone = false;
+    refreshFlowUI();
 
     if (changedCount > 0) {
       alert(`Sono stati confermati automaticamente ${changedCount} match per questo fornitore.\nControlla comunque un campione per sicurezza.`);
     } else {
-      alert("Non ho trovato righe MATCH_FIX sicure da confermare per questo fornitore.");
+      alert("Non ho trovato righe sicure da confermare per questo fornitore con i criteri attuali.");
     }
   }
 
@@ -5623,14 +5883,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
         return;
       }
 
-      const conferma = confirm(
-        "Vuoi confermare automaticamente come MATCH OK tutte le righe di questo fornitore " +
-        "che risultano MATCH_FIX ma con importo/data coerenti?\n\n" +
-        "L'operazione è reversibile con 'Annulla ultimo elimina', ma controlla sempre un campione."
-      );
-      if (!conferma) return;
-
-      bulkApproveMatchesForSupplier(row);
+      bulkApproveMatchesForSupplier(row, true);
     });
   }
 
@@ -5705,19 +5958,54 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   ThemeManager.init();
 
   refreshLearningPanel();
+  refreshFlowUI();
+
+  function buildAiCopyPayload(row) {
+      if (!row) return null;
+
+      const fmtMoney = (v) => {
+        const num = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+        if (isNaN(num)) return "n/d";
+        return formatNumberITDisplay(num);
+      };
+
+      const sideBlock = (label, rec) => {
+        if (!rec) return [`${label}: assente`];
+        const tipo = rec.isNC ? "NC" : label;
+        const dataStr = rec.data ? formatDateIT(rec.data) : (rec.dataStr || rec.dataIso || "n/d");
+        return [
+          `${label} | Tipo record: ${tipo}`,
+          `Numero documento: ${rec.num || "n/d"}`,
+          `Data: ${dataStr || "n/d"}`,
+          `Fornitore: ${rec.den || "n/d"} (PIVA/CF: ${rec.piva || "n/d"})`,
+          `Imponibile / IVA / Totale: ${fmtMoney(rec.imp)} / ${fmtMoney(rec.iva)} / ${fmtMoney(rec.tot)}`
+        ];
+      };
+
+      const lines = [];
+      lines.push(...sideBlock("ADE", row.ADE));
+      lines.push("---");
+      lines.push(...sideBlock(row.GEST?.isNC ? "NC" : "GEST", row.GEST));
+      lines.push("---");
+      lines.push(`Stato match: ${row.STATUS} | Criterio: ${row.CRITERIO || "n/d"}`);
+
+      const mapKey = row.GEST?.isNC ? "GEST_C" : "GEST_B";
+      const cfg = getColumnConfig(mapKey);
+      lines.push(`Mapping ${mapKey}: num=${cfg.num || "n/d"}, data=${cfg.data || "n/d"}, imp=${cfg.imp || "n/d"}, iva=${cfg.iva || "n/d"}, tot=${cfg.tot || "n/d"}`);
+
+      return lines.join("\n");
+  }
 
   // --- FUNZIONE PER IL BOTTONE "COPIA REPORT" ---
   const btnCopyReport = document.getElementById("btnCopyReport");
   if (btnCopyReport) {
       btnCopyReport.addEventListener("click", () => {
           const txtArea = document.getElementById("editMatchNote");
-          if (!txtArea || !txtArea.value) return;
-  
-          // Seleziona e copia
-          txtArea.select();
-          txtArea.setSelectionRange(0, 99999); // Per mobile
-          
-          navigator.clipboard.writeText(txtArea.value).then(() => {
+          const row = currentEditRowId != null ? getRowById(currentEditRowId) : null;
+          const payload = buildAiCopyPayload(row) || (txtArea ? txtArea.value : "");
+          if (!payload) return;
+
+          navigator.clipboard.writeText(payload).then(() => {
               // Feedback visivo temporaneo
               const originalText = btnCopyReport.textContent;
               btnCopyReport.textContent = "✅ COPIATO!";

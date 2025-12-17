@@ -185,6 +185,44 @@
           <!-- MAIN COLUMN: ACTIONS + TABLE -->
           <div class="col-main">
             <div class="card">
+              <div class="flow-stepper" id="flowStepper">
+                <div class="flow-step disabled" data-step="1">
+                  <div class="flow-step-circle">1</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Carica file</div>
+                    <div class="flow-step-desc">Carica ADE (A) e Gestionale (B)</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="2">
+                  <div class="flow-step-circle">2</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Verifica / Mapping colonne</div>
+                    <div class="flow-step-desc">Conferma le colonne richieste</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="3">
+                  <div class="flow-step-circle">3</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Confronta fatture</div>
+                    <div class="flow-step-desc">Esegui il match guidato</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="4">
+                  <div class="flow-step-circle">4</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Correggi / Conferma</div>
+                    <div class="flow-step-desc">Rivedi i match proposti</div>
+                  </div>
+                </div>
+                <div class="flow-step disabled" data-step="5">
+                  <div class="flow-step-circle">5</div>
+                  <div class="flow-step-text">
+                    <div class="flow-step-title">Esporta risultati</div>
+                    <div class="flow-step-desc">Scarica i file di sintesi</div>
+                  </div>
+                </div>
+              </div>
+
                <div class="actions-row">
                  <div class="actions-left">
                    <button id="btnMatch" class="btn btn-primary">
@@ -208,7 +246,7 @@
                  
                  <div class="actions-right">
                    <button id="btnUndoDelete" class="btn btn-tertiary" disabled>
-                     Annulla elimina
+                     Annulla ultima azione
                    </button>
                    <button id="btnResetAll" class="btn btn-tertiary" disabled>
                      Ripristina tutto
@@ -565,6 +603,7 @@
       Seleziona per ogni campo ContAIbil la colonna corretta del file
       (Mexal/Contel). Puoi salvarla nelle procedure così non dovrai rifarlo ogni volta.
     </p>
+    <div id="gestMapHelper" class="mapping-helper-text">Obbligatori: Numero documento, Data, Totale oppure (Imponibile + IVA).</div>
 
     <div class="form-grid">
       <div>
