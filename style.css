@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+@media not all { /* MERGE CONFLICT DISCARDED (kept incoming section below) */
 :root {
   /* 1. FONT SYSTEM */
   --font-primary: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -384,7 +384,7 @@ body {
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible; /* NB: overflow hidden rompe position: sticky (toolbar + header). */
   /* Modifiche per layout full-width */
   gap: 18px;
   max-width: 100%;
@@ -2808,7 +2808,7 @@ tr.vat-closed {
   min-height: 420px;
   max-height: calc(100vh - 240px);
 }
-=======
+}
 :root {
   /* 1. FONT SYSTEM */
   --font-primary: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -3194,7 +3194,7 @@ body {
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible; /* NB: overflow hidden rompe position: sticky (toolbar + header). */
   /* Modifiche per layout full-width */
   gap: 18px;
   max-width: 100%;
@@ -5304,7 +5304,7 @@ table.excel-view thead th {
   position: relative;
   flex: 1 1 auto;
   min-height: 420px;
-  height: calc(100vh - 320px); /* Regolabile per allungare la tabella */
+  height: calc(100vh - 260px); /* Regolabile per allungare la tabella */
 }
 
 /* Sezioni principali: colonna e altezza viewport */
@@ -5323,7 +5323,7 @@ table.excel-view thead th {
 /* Schermi grandi: più spazio verticale alla tabella */
 @media (min-height: 900px) {
   .table-wrapper {
-    height: calc(100vh - 280px);
+    height: calc(100vh - 220px);
   }
 }
 
@@ -5618,4 +5618,3 @@ tr.vat-closed {
   min-height: 420px;
   max-height: calc(100vh - 240px);
 }
->>>>>>> c40f045 (Aggiornamenti UI e logica Contaibil)

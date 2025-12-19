@@ -1536,6 +1536,31 @@ function formatDateForUI(dateObj) {
   async function ensureMappingOrAsk(headers, rows, mappingKey, fileDescription) {
     ensureLearningShape();
 
+    // 0. Se sto mappando File C (NC) e non ho ancora una config salvata,
+    // prova a riusare il mapping del File B se risulta valido sulle intestazioni correnti.
+    if (mappingKey === "GEST_C") {
+      const cfgC = getColumnConfig("GEST_C");
+      const hasCfgC = (cfgC && (cfgC.num || cfgC.data || cfgC.tot || cfgC.imp || cfgC.iva));
+      if (!hasCfgC) {
+        const cfgB = getColumnConfig("GEST_B");
+        const hasCfgB = (cfgB && (cfgB.num || cfgB.data || cfgB.tot || cfgB.imp || cfgB.iva));
+        if (hasCfgB) {
+          const reuseValidation = validateColumnConfig(headers, cfgB, rows);
+          if (reuseValidation.severity !== "BLOCK") {
+            updateColumnConfig("GEST_C", cfgB);
+            markMappingConfirmed("GEST_C", headers);
+            const helper = document.getElementById("gestMapHelper");
+            if (helper) {
+              const prefix = reuseValidation.severity === "WARN" ? "⚠️" : "✅";
+              const details = reuseValidation.reasons?.length ? `<br>${reuseValidation.reasons.join("<br>")}` : "";
+              helper.innerHTML = `${prefix} <strong>Riutilizzato mapping File B per File C</strong>${details}`;
+            }
+            return cfgB;
+          }
+        }
+      }
+    }
+
     // 1. Prova a caricare cfg esistente
     let cfg = getColumnConfig(mappingKey);
     let fromCache = (cfg && (cfg.num || cfg.data || cfg.tot || cfg.imp));
@@ -1549,20 +1574,14 @@ function formatDateForUI(dateObj) {
         markMappingConfirmed(mappingKey, headers);
         return cfg;
       } else if (validation.severity === "WARN") {
-        // Warning: mostra messaggio ma procedi con conferma automatica
+        // Warning: NON aprire modal (richiesta UX). Procedi e mostra solo un avviso.
         console.warn(`Mapping ${mappingKey} con warning:`, validation.reasons);
         const helper = document.getElementById("gestMapHelper");
         if (helper) {
           helper.innerHTML = `⚠️ <strong>Warning mapping salvato:</strong><br>${validation.reasons.join("<br>")}`;
         }
-        // Apri modal per conferma
-        const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
-        if (userCfg && (userCfg.num || userCfg.data)) {
-          updateColumnConfig(mappingKey, userCfg);
-          markMappingConfirmed(mappingKey, headers);
-          return userCfg;
-        }
-        return null;
+        markMappingConfirmed(mappingKey, headers);
+        return cfg;
       } else {
         // BLOCK: cfg esistente non valido
         const helper = document.getElementById("gestMapHelper");
@@ -1583,33 +1602,39 @@ function formatDateForUI(dateObj) {
     const inferred = inferColumnsFromHeaders(headers, mappingKey);
     const validation = validateColumnConfig(headers, inferred.cfg, rows);
 
-    if (validation.severity === "OK" && inferred.score >= 6) {
-      // Inferenza affidabile: salva e conferma automaticamente
+    if (validation.severity !== "BLOCK") {
+      // OK o WARN: NON aprire modal. Salva e procedi.
       console.log(`Auto-detected mapping for ${mappingKey}:`, inferred.cfg);
       updateColumnConfig(mappingKey, inferred.cfg);
       markMappingConfirmed(mappingKey, headers);
+
       const helper = document.getElementById("gestMapHelper");
       if (helper) {
-        helper.innerHTML = `✅ <strong>Mapping rilevato automaticamente</strong>`;
+        if (validation.severity === "OK" && inferred.score >= 6) {
+          helper.innerHTML = `✅ <strong>Mapping rilevato automaticamente</strong>`;
+        } else {
+          const allReasons = [...(inferred.reasons || []), ...(validation.reasons || [])].filter(Boolean);
+          const details = allReasons.length ? `<br>${allReasons.join("<br>")}` : "";
+          helper.innerHTML = `⚠️ <strong>Mapping rilevato con avvisi</strong>${details}`;
+        }
       }
       return inferred.cfg;
-    } else {
-      // Inferenza incompleta/inaffidabile: chiedi manualmente
-      const helper = document.getElementById("gestMapHelper");
-      if (helper) {
-        const allReasons = [...inferred.reasons, ...validation.reasons];
-        helper.innerHTML = `🔍 <strong>Mapping non rilevabile automaticamente:</strong><br>${allReasons.join("<br>")}<br><br>Seleziona manualmente le colonne corrette.`;
-      }
-      
-      // Pre-compila con l'inferenza parziale
-      const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
-      if (userCfg && (userCfg.num || userCfg.data)) {
-        updateColumnConfig(mappingKey, userCfg);
-        markMappingConfirmed(mappingKey, headers);
-        return userCfg;
-      }
-      return null;
     }
+
+    // BLOCK: qui sì che serve il popup
+    const helper = document.getElementById("gestMapHelper");
+    if (helper) {
+      const allReasons = [...(inferred.reasons || []), ...(validation.reasons || [])].filter(Boolean);
+      helper.innerHTML = `🚫 <strong>Mapping obbligatorio:</strong><br>${allReasons.join("<br>")}<br><br>Seleziona manualmente le colonne corrette.`;
+    }
+
+    const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
+    if (userCfg && (userCfg.num || userCfg.data || userCfg.tot || userCfg.imp || userCfg.iva)) {
+      updateColumnConfig(mappingKey, userCfg);
+      markMappingConfirmed(mappingKey, headers);
+      return userCfg;
+    }
+    return null;
   }
 
   // ---------- MAPPING MANUALE COLONNE GESTIONALE ----------
@@ -5593,7 +5618,12 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       const content = await loadTableFromFile(file, false);
       const parsed = parseCSV(content);
       cachedHeaders[mappingKey] = parsed.headers;
-      await ensureGestConfigForHeaders(parsed.headers, parsed.rows, description, true, mappingKey);
+      const cfg = await ensureMappingOrAsk(parsed.headers, parsed.rows, mappingKey, description);
+      if (!cfg) {
+        statusEl.textContent = `⚠️ Mapping colonne richiesto per ${description}. Usa "Forza mapping colonne" per completarlo.`;
+      } else {
+        statusEl.textContent = `✅ Colonne lette da ${description}.`;
+      }
     } catch (e) {
       console.error("Errore durante la lettura del file", e);
       alert(`Errore lettura ${description}: ${e?.message || e}`);
@@ -6302,15 +6332,21 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
           // File B e C sono sempre GESTIONALE → isADE = false
           const fileContent = await loadTableFromFile(fileInput.files[0], false);
           const parsed = parseCSV(fileContent);
+          cachedHeaders[mappingKey] = parsed.headers;
           
           if (!parsed.headers || parsed.headers.length === 0) {
               alert("Impossibile leggere le colonne da questo file.");
               return;
           }
 
-          // Chiamiamo la funzione di mapping forzando la comparsa del popup
-          await ensureGestConfigForHeaders(parsed.headers, parsed.rows, fileDescription, true, mappingKey);
-          statusEl.textContent = `Mapping per "${fileDescription}" aggiornato. Ora puoi premere "Confronta fatture".`;
+          const newCfg = await openGestMappingModal(parsed.headers, fileDescription, mappingKey);
+          if (newCfg && (newCfg.num || newCfg.data || newCfg.tot || newCfg.imp || newCfg.iva)) {
+            updateColumnConfig(mappingKey, newCfg);
+            markMappingConfirmed(mappingKey, parsed.headers);
+            statusEl.textContent = `Mapping per "${fileDescription}" aggiornato. Ora puoi premere "Confronta fatture".`;
+          } else {
+            statusEl.textContent = `Mapping per "${fileDescription}" non modificato.`;
+          }
           flowState.matchDone = false;
           flowState.correctionsDone = false;
           flowState.exportDone = false;
@@ -7170,9 +7206,16 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       try {
         const txt = await loadTableFromFile(fileInput.files[0], false);
         const parsed = parseCSV(txt);
-        await ensureGestConfigForHeaders(parsed.headers, parsed.rows, "Gestionale Vendite (File B)", true, "GEST_SALES");
+        cachedHeaders["GEST_SALES"] = parsed.headers;
         const st = document.getElementById("salesStatusText");
-        if (st) st.textContent = "Mapping aggiornato per Gestionale Vendite. Ora puoi premere Confronta.";
+        const newCfg = await openGestMappingModal(parsed.headers, "Gestionale Vendite (File B)", "GEST_SALES");
+        if (newCfg && (newCfg.num || newCfg.data || newCfg.tot || newCfg.imp || newCfg.iva)) {
+          updateColumnConfig("GEST_SALES", newCfg);
+          markMappingConfirmed("GEST_SALES", parsed.headers);
+          if (st) st.textContent = "Mapping aggiornato per Gestionale Vendite. Ora puoi premere Confronta.";
+        } else {
+          if (st) st.textContent = "Mapping non modificato per Gestionale Vendite.";
+        }
       } catch (e) {
         console.error(e); alert("Errore durante la lettura colonne per mapping.");
       }
@@ -7185,9 +7228,16 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       try {
         const txt = await loadTableFromFile(fileInput.files[0], false);
         const parsed = parseCSV(txt);
-        await ensureGestConfigForHeaders(parsed.headers, parsed.rows, "Note Credito Vendite (File C)", true, "GEST_SALES_NC");
+        cachedHeaders["GEST_SALES_NC"] = parsed.headers;
         const st = document.getElementById("salesStatusText");
-        if (st) st.textContent = "Mapping aggiornato per Note Credito Vendite.";
+        const newCfg = await openGestMappingModal(parsed.headers, "Note Credito Vendite (File C)", "GEST_SALES_NC");
+        if (newCfg && (newCfg.num || newCfg.data || newCfg.tot || newCfg.imp || newCfg.iva)) {
+          updateColumnConfig("GEST_SALES_NC", newCfg);
+          markMappingConfirmed("GEST_SALES_NC", parsed.headers);
+          if (st) st.textContent = "Mapping aggiornato per Note Credito Vendite.";
+        } else {
+          if (st) st.textContent = "Mapping non modificato per Note Credito Vendite.";
+        }
       } catch (e) { console.error(e); alert("Errore durante la lettura colonne per mapping."); }
     });
   }
@@ -8501,7 +8551,14 @@ function renderPeriodKpi(results) {
       const resizer = document.createElement('div');
       resizer.className = 'resizer';
       // assicurati che il th sia posizionato relativamente
-      th.style.position = th.style.position || 'relative';
+      try {
+        const computedPos = window.getComputedStyle(th).position;
+        // Non toccare sticky/relative/absolute/fixed: serve a non rompere lo sticky dell'header
+        if (computedPos === 'static') th.style.position = 'relative';
+      } catch (e) {
+        // Fallback ultra-sicuro (senza sovrascrivere eventuale sticky via inline style)
+        if (!th.style.position) th.style.position = 'relative';
+      }
       th.appendChild(resizer);
 
       let isResizing = false;
