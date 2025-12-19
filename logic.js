@@ -6591,11 +6591,13 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     editRowInfo.textContent = `Riga #${row.rowId} – Stato attuale: ${row.STATUS}`;
 
     editBackdrop.classList.remove("hidden");
+    document.body.classList.add("modal-open");
   }
 
   function closeEditPanel() {
     currentEditRowId = null;
     editBackdrop.classList.add("hidden");
+    document.body.classList.remove("modal-open");
   }
 
   function saveEditPanel() {
