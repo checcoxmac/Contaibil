@@ -1863,9 +1863,28 @@ function formatDateForUI(dateObj) {
 
     // salvataggio / caricamento file JSON
   function setupLearningButtons() {
+    const btnView = document.getElementById("btnViewCode");
     const btnSave = document.getElementById("btnSaveProcedures");
     const btnLoad = document.getElementById("btnLoadProcedures");
     const fileInput = document.getElementById("fileProcedures");
+    const codeBox = document.getElementById("learningCodeBox");
+
+    // --- VISUALIZZA CODICE ---
+    if (btnView && codeBox) {
+      let isCodeVisible = true; // inizialmente visibile
+      
+      btnView.addEventListener("click", () => {
+        isCodeVisible = !isCodeVisible;
+        
+        if (isCodeVisible) {
+          codeBox.style.display = "block";
+          btnView.innerHTML = "👁️ Nascondi Codice";
+        } else {
+          codeBox.style.display = "none";
+          btnView.innerHTML = "👁️ Mostra Codice";
+        }
+      });
+    }
 
     // --- SALVA PROCEDURE ---
     if (btnSave) {
