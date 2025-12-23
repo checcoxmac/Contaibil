@@ -6,6 +6,51 @@ console.log("✅ Fix CA Bank quote handling attivo");
 console.log("✅ Debug logging completo attivo");
 
 window.addEventListener("DOMContentLoaded", () => {
+  const fatalErrors = [];
+  const errorBanner = document.getElementById("globalErrorBanner");
+  const errorText = document.getElementById("globalErrorText");
+  const btnDismissError = document.getElementById("btnDismissError");
+
+  const showErrorBanner = (msg) => {
+    if (errorText) errorText.textContent = msg || "Errore inatteso";
+    if (errorBanner) errorBanner.classList.remove("hidden");
+  };
+  const hideErrorBanner = () => {
+    if (errorBanner) errorBanner.classList.add("hidden");
+  };
+  if (btnDismissError) btnDismissError.addEventListener("click", hideErrorBanner);
+
+  const pushDebugLog = (level, payload) => {
+    try {
+      window.__CONTAIBIL_DEBUG_LOGS = window.__CONTAIBIL_DEBUG_LOGS || [];
+      window.__CONTAIBIL_DEBUG_LOGS.push({ t: new Date().toISOString(), level, ...payload });
+      if (window.__CONTAIBIL_DEBUG_LOGS.length > 400) window.__CONTAIBIL_DEBUG_LOGS.shift();
+    } catch (_) {}
+  };
+
+  const handleFatal = (err, label = "init") => {
+    const msg = `${label}: ${err?.message || err}`;
+    console.error("FATAL", msg, err);
+    fatalErrors.push({ t: new Date().toISOString(), label, error: msg, stack: err?.stack || null });
+    showErrorBanner(msg);
+    pushDebugLog("error", { type: "fatal", label, message: msg, stack: err?.stack || null });
+  };
+
+  if (!window.__GLOBAL_ERROR_UI) {
+    window.__GLOBAL_ERROR_UI = true;
+    window.addEventListener("error", (e) => {
+      const msg = e?.message || "Errore runtime";
+      showErrorBanner(msg);
+      pushDebugLog("error", { type: "window.error", message: msg, file: e?.filename, line: e?.lineno, col: e?.colno, stack: e?.error?.stack });
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      const msg = e?.reason?.message || e?.reason || "Unhandled rejection";
+      showErrorBanner(String(msg));
+      pushDebugLog("error", { type: "unhandledrejection", reason: msg, stack: e?.reason?.stack });
+    });
+  }
+
+  try {
   // --- WIDE MODE TOGGLE ---
   const btnWideMode = document.getElementById('btnWideMode');
   if (btnWideMode) {
@@ -98,6 +143,229 @@ window.addEventListener("DOMContentLoaded", () => {
   let lastAdeSalesRecords = [];
   let lastGestSalesRecords = [];
   let lastSalesResults = [];
+
+  // ============================================================
+  // 🌐 OGGETTI GLOBALI: state e ui (per debug robusto)
+  // ============================================================
+  // Snapshot globale dei dati principali (evita ReferenceError nei pack di debug)
+  window.state = window.state || {
+    lastAdePurchases: [],
+    lastGestPurchases: [],
+    lastResults: [],
+    lastAdeSales: [],
+    lastGestSales: [],
+    lastSalesResults: []
+  };
+
+  // Riferimenti UI centralizzati (non obbligatori, ma utili e sicuri)
+  window.ui = window.ui || {};
+  try {
+    Object.assign(window.ui, {
+      chkIncludePrevYear: document.getElementById("vatIncludePrevYear") || document.getElementById("chkIncludePrevYear"),
+      chkShowClosedMonths: document.getElementById("chkShowClosedMonths"),
+      vatDateBasis: document.getElementById("vatDateBasis"),
+      vatModeSoloAcq: document.getElementById("vatModeAcquisti"),
+      vatModeComplete: document.getElementById("vatModeCompleta"),
+      vatInitialCredit: document.getElementById("vatOpeningBalance"),
+      btnDebugVat: document.getElementById("btnDebugVat")
+    });
+  } catch (_) {
+    // Non bloccare mai l'app se il DOM non è ancora pronto
+  }
+
+  // ===============================
+  // 📦 DEBUG PACK (per AI) - cattura contesto + errori + log
+  // ===============================
+  const DIAG_MAX = 400;
+  const diagBuffer = [];
+  let diagStage = "BOOT";
+  let diagLastAction = null;
+  let diagErrors = [];
+  let diagCompany = { pivaCliente: "", denCliente: "" };
+  let signAnomalies = [];
+
+  function diagMark(stage, extra = null) {
+    diagStage = stage;
+    diagPush({ type: "stage", stage, extra });
+  }
+
+  function diagPush(entry) {
+    try {
+      diagBuffer.push({ t: new Date().toISOString(), ...entry });
+      while (diagBuffer.length > DIAG_MAX) diagBuffer.shift();
+    } catch (_) {}
+  }
+
+  function safeArg(a) {
+    if (a instanceof Error) return { message: a.message, stack: a.stack };
+    if (typeof a === "string") return a.length > 1200 ? a.slice(0, 1200) + "…(cut)" : a;
+    if (typeof a === "number" || typeof a === "boolean" || a == null) return a;
+    try {
+      const s = JSON.stringify(a);
+      return s.length > 1800 ? s.slice(0, 1800) + "…(cut)" : JSON.parse(s);
+    } catch (_) {
+      return String(a);
+    }
+  }
+
+  function initDiagCapture() {
+    if (window.__contaibilDiagInit) return;
+    window.__contaibilDiagInit = true;
+
+    // intercetta console
+    const wrap = (method, level) => {
+      const orig = console[method].bind(console);
+      console[method] = (...args) => {
+        diagPush({ type: "console", level, args: args.map(safeArg) });
+        orig(...args);
+      };
+    };
+
+    wrap("log", "log");
+    wrap("info", "info");
+    wrap("warn", "warn");
+    wrap("error", "error");
+    wrap("debug", "debug");
+
+    // errori runtime
+    window.addEventListener("error", (e) => {
+      const err = {
+        t: new Date().toISOString(),
+        type: "window.error",
+        message: e.message,
+        file: e.filename,
+        line: e.lineno,
+        col: e.colno,
+        stack: e.error && e.error.stack ? e.error.stack : null
+      };
+      diagErrors.push(err);
+      diagPush(err);
+    });
+
+    window.addEventListener("unhandledrejection", (e) => {
+      const err = {
+        t: new Date().toISOString(),
+        type: "unhandledrejection",
+        reason: safeArg(e.reason)
+      };
+      diagErrors.push(err);
+      diagPush(err);
+    });
+
+    // ultimo click/input (per capire "dove eri")
+    window.addEventListener("click", (e) => {
+      const el = e.target;
+      const id = el && el.id ? el.id : "";
+      const cls = el && el.className ? String(el.className).slice(0, 120) : "";
+      const txt = el && el.textContent ? String(el.textContent).trim().slice(0, 80) : "";
+      diagLastAction = { kind: "click", id, cls, txt };
+      diagPush({ type: "action", ...diagLastAction });
+    }, true);
+
+    window.addEventListener("input", (e) => {
+      const el = e.target;
+      if (!el) return;
+      const id = el.id || "";
+      const name = el.name || "";
+      const v = (el.value != null) ? String(el.value).slice(0, 120) : "";
+      diagLastAction = { kind: "input", id, name, value: v };
+      diagPush({ type: "action", ...diagLastAction });
+    }, true);
+
+    diagMark("BOOT.ready");
+  }
+
+  initDiagCapture();
+
+  function getActiveSectionId() {
+    const active = document.querySelector(".section.active");
+    return active ? (active.id || active.getAttribute("data-section") || "UNKNOWN") : "UNKNOWN";
+  }
+
+  function getSafeOuterHTML(selector, maxLen = 6000) {
+    try {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const html = el.outerHTML;
+      return html.length > maxLen ? html.slice(0, maxLen) + "\n<!-- cut -->" : html;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function buildDebugPack() {
+    // prova a prendere mapping se esistono queste funzioni nel tuo codice
+    const safeGetMapping = (k) => {
+      try { return (typeof getColumnConfig === "function") ? getColumnConfig(k) : null; }
+      catch (_) { return null; }
+    };
+
+    return {
+      meta: {
+        app: "ContAIbil",
+        time: new Date().toISOString(),
+        url: location.href,
+        userAgent: navigator.userAgent
+      },
+      where: {
+        stage: diagStage,
+        lastAction: diagLastAction,
+        activeSection: getActiveSectionId(),
+        scrollY: window.scrollY,
+        viewport: { w: window.innerWidth, h: window.innerHeight }
+      },
+      company: diagCompany,
+      state: {
+        flowState: (typeof flowState !== "undefined") ? flowState : null,
+        currentFilter: (typeof currentFilter !== "undefined") ? currentFilter : null,
+        currentMonthFilter: (typeof currentMonthFilter !== "undefined") ? currentMonthFilter : null,
+        currentSupplierFilter: (typeof currentSupplierFilter !== "undefined") ? currentSupplierFilter : null
+      },
+      counts: {
+        ade: (typeof lastAdeRecords !== "undefined" && Array.isArray(lastAdeRecords)) ? lastAdeRecords.length : null,
+        gestA: (typeof lastGestRecords !== "undefined" && Array.isArray(lastGestRecords)) ? lastGestRecords.length : null,
+        results: (typeof lastResults !== "undefined" && Array.isArray(lastResults)) ? lastResults.length : null
+      },
+      mapping: {
+        ADE: safeGetMapping("ADE"),
+        GEST_B: safeGetMapping("GEST_B"),
+        GEST_C: safeGetMapping("GEST_C")
+      },
+      // "fotografia" della UI: tagliata per non diventare enorme
+      ui: {
+        activeSectionHTML: getSafeOuterHTML(".section.active", 9000),
+        vatSectionHTML: getSafeOuterHTML("#section-vat", 6000)
+      },
+      errors: diagErrors.slice(-50),
+      lastLogs: diagBuffer.slice(-180)
+    };
+  }
+
+  function downloadJsonFile(filename, obj) {
+    const text = JSON.stringify(obj, null, 2);
+    const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const btnSaveDebugPack = document.getElementById("btnSaveDebugPack");
+  if (btnSaveDebugPack) {
+    btnSaveDebugPack.addEventListener("click", () => {
+      diagMark("DEBUGPACK.click");
+      const pack = buildDebugPack();
+      const piva = (pack.company && pack.company.pivaCliente) ? pack.company.pivaCliente : "NO_PIVA";
+      const sec = (pack.where && pack.where.activeSection) ? pack.where.activeSection : "NOSEC";
+      const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+      downloadJsonFile(`contaibil_debug_${piva}_${sec}_${ts}.json`, pack);
+      if (typeof setStatus === "function") setStatus("📦 Debug salvato. Caricalo qui in chat insieme allo screenshot.");
+    });
+  }
   let currentSalesFilter = "ALL";
   let totalAdeSalesCount = 0;
   let totalGestSalesCount = 0;
@@ -138,6 +406,220 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   const cachedHeadersSales = { GEST_SALES: null };
 
+  // Azienda corrente (ricavata dal file ADE)
+  let currentClient = { piva: "", name: "" };
+
+  // ===== DEBUG: buffer console (max 400) =====
+  if (!window.__CONTAIBIL_CONSOLE_PATCHED) {
+    window.__CONTAIBIL_CONSOLE_PATCHED = true;
+    window.__CONTAIBIL_DEBUG_LOGS = window.__CONTAIBIL_DEBUG_LOGS || [];
+    const MAX = 400;
+
+    const safe = (v) => {
+      try {
+        if (v instanceof Error) return { name: v.name, message: v.message, stack: v.stack };
+        if (typeof v === "string") return v;
+        return JSON.parse(JSON.stringify(v));
+      } catch {
+        return String(v);
+      }
+    };
+
+    ["log", "warn", "error"].forEach((level) => {
+      const orig = console[level].bind(console);
+      console[level] = (...args) => {
+        try {
+          window.__CONTAIBIL_DEBUG_LOGS.push({
+            t: new Date().toISOString(),
+            level,
+            args: args.map(safe),
+          });
+          if (window.__CONTAIBIL_DEBUG_LOGS.length > MAX) {
+            window.__CONTAIBIL_DEBUG_LOGS.splice(0, window.__CONTAIBIL_DEBUG_LOGS.length - MAX);
+          }
+        } catch {}
+        orig(...args);
+      };
+    });
+  }
+
+  // alias compatibilità
+  const downloadJson = (obj, filename) => downloadJsonFile(filename, obj);
+
+  function safeJson(v) {
+    try { return JSON.parse(JSON.stringify(v)); } catch { return String(v); }
+  }
+
+  function summarizeMonthStats(records, basis) {
+    const months = {};
+    let missing = 0;
+    const examplesMissing = [];
+
+    for (const r of records) {
+      const d = getVatDateForRecordHelper(r, basis);
+      if (!d) {
+        missing++;
+        if (examplesMissing.length < 20) {
+          examplesMissing.push({
+            num: r?.num ?? "",
+            den: r?.den ?? "",
+            data: r?.data ?? null,
+            dataEmissione: r?.dataEmissione ?? null,
+            dataRicezione: r?.dataRicezione ?? null
+          });
+        }
+        continue;
+      }
+      if (!(d instanceof Date) || isNaN(d.getTime())) {
+        missing++;
+        continue;
+      }
+      const mk = monthKeyFromDate(d);
+      months[mk] = (months[mk] || 0) + 1;
+    }
+
+    return { months, missing, examplesMissing };
+  }
+
+  function buildVatDebugPack() {
+    const basisEl = document.getElementById("vatDateBasis");
+    const yearEl = document.getElementById("vatYearFilter");
+    const modeAcqEl = document.getElementById("vatModeAcquisti");
+    const modeCompEl = document.getElementById("vatModeCompleta");
+    const cbPrevEl = document.getElementById("vatIncludePrevYear") || document.getElementById("chkIncludePrevYear");
+
+    const ui = {
+      protocol: location.protocol,
+      url: location.href,
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      userAgent: navigator.userAgent,
+      vatDateBasis: basisEl ? basisEl.value : null,
+      vatYearFilter: yearEl ? yearEl.value : null,
+      vatMode: modeCompEl?.checked ? "COMPLETA" : (modeAcqEl?.checked ? "ACQUISTI" : null),
+      includePrevYear: cbPrevEl ? !!cbPrevEl.checked : (localStorage.getItem("contaibl-vat-include-prev-year") === "true")
+    };
+
+    // Usa state come sorgente primaria, fallback alle variabili legacy
+    const purchases = Array.isArray(window.state?.lastAdePurchases) ? window.state.lastAdePurchases : (Array.isArray(lastAdeRecords) ? lastAdeRecords : []);
+    const sales = Array.isArray(window.state?.lastAdeSales) ? window.state.lastAdeSales : (Array.isArray(lastAdeSalesRecords) ? lastAdeSalesRecords : []);
+
+    const statsPurch = summarizeMonthStats(purchases, ui.vatDateBasis || "AUTO");
+    const statsSales = summarizeMonthStats(sales, "EMISSIONE");
+
+    let monthlyComplete = null;
+    try {
+      if (typeof computeMonthlyVatComplete === "function") monthlyComplete = computeMonthlyVatComplete();
+    } catch (e) {
+      monthlyComplete = { error: String(e?.message || e), stack: e?.stack || null };
+    }
+
+    return {
+      kind: "contaibil-debug-liquidazione",
+      createdAt: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      ui,
+      counts: {
+        adeAcquisti: purchases.length,
+        adeVendite: sales.length,
+        results: Array.isArray(window.state?.lastResults) ? window.state.lastResults.length : (Array.isArray(lastResults) ? lastResults.length : null)
+      },
+      dateStats: {
+        acquisti: safeJson(statsPurch),
+        vendite: safeJson(statsSales)
+      },
+      monthly: safeJson(monthlyComplete),
+      logs: window.__CONTAIBIL_DEBUG_LOGS ? window.__CONTAIBIL_DEBUG_LOGS.slice(-400) : null
+    };
+  }
+
+  function downloadVatDebugPack() {
+    const pack = buildVatDebugPack();
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadJson(pack, `ContAIbil_DEBUG_LIQUIDAZIONE_${ts}.json`);
+    if (typeof setStatus === "function") setStatus("🧪 Debug liquidazione scaricato. Mandami JSON + screenshot.");
+  }
+
+  const btnDebugVat = document.getElementById("btnDebugVat");
+  if (btnDebugVat) btnDebugVat.addEventListener("click", downloadVatDebugPack);
+
+  // ===== Debug pack topbar (diagnosi completa) =====
+  function buildTopbarDiagnosisPack() {
+    const modeAcqEl = document.getElementById("vatModeAcquisti");
+    const modeCompEl = document.getElementById("vatModeCompleta");
+    const basisEl = document.getElementById("vatDateBasis");
+    const cbPrev = document.getElementById("vatIncludePrevYear");
+
+    const vatMode = modeCompEl?.checked ? "COMPLETA" : (modeAcqEl?.checked ? "ACQUISTI" : null);
+    const vatBasis = basisEl ? String(basisEl.value || "RICEZIONE").toUpperCase() : "RICEZIONE";
+    const includePrevYear = cbPrev ? !!cbPrev.checked : (localStorage.getItem("contaibl-vat-include-prev-year") === "true");
+
+    const vatState = loadVatState();
+
+    const counts = {
+      adeAcquisti: Array.isArray(lastAdeRecords) ? lastAdeRecords.length : 0,
+      adeVendite: Array.isArray(lastAdeSalesRecords) ? lastAdeSalesRecords.length : 0,
+      gestAcquisti: Array.isArray(lastGestRecords) ? lastGestRecords.length : 0,
+      gestVendite: Array.isArray(lastGestSalesRecords) ? lastGestSalesRecords.length : 0,
+      results: Array.isArray(lastResults) ? lastResults.length : 0,
+      salesResults: Array.isArray(lastSalesResults) ? lastSalesResults.length : 0
+    };
+
+    // Preview calcolo liquidazione
+    let preview = null;
+    try {
+      if (vatMode === "COMPLETA" && typeof computeMonthlyVatComplete === "function") {
+        preview = computeMonthlyVatComplete();
+      } else {
+        const basis = vatBasis;
+        const vat = buildVatGroups(lastAdeRecords || [], basis, includePrevYear);
+        preview = vat;
+      }
+    } catch (e) {
+      preview = { error: String(e?.message || e), stack: e?.stack || null };
+    }
+
+    const mappings = {
+      ADE: (typeof getColumnConfig === "function") ? getColumnConfig("ADE") : null,
+      ADE_VENDITE: (typeof getColumnConfig === "function") ? getColumnConfig("ADE_SALES") : null,
+      GEST_B: (typeof getColumnConfig === "function") ? getColumnConfig("GEST_B") : null,
+      GEST_C: (typeof getColumnConfig === "function") ? getColumnConfig("GEST_C") : null
+    };
+
+    return {
+      kind: "contaibil-diagnosi",
+      createdAt: new Date().toISOString(),
+      env: {
+        appVersion: "2025-12-10",
+        userAgent: navigator.userAgent,
+        location: location.href,
+        viewport: { w: window.innerWidth, h: window.innerHeight }
+      },
+      company: diagCompany,
+      settings: {
+        vatMode,
+        vatBasis,
+        includePrevYear
+      },
+      vatState,
+      counts,
+      mappings,
+      preview,
+      signAnomalies: signAnomalies.slice(-50),
+      logs: window.__CONTAIBIL_DEBUG_LOGS ? window.__CONTAIBIL_DEBUG_LOGS.slice(-200) : [],
+      diagErrors: diagErrors.slice(-50)
+    };
+  }
+
+  function downloadTopbarDiagnosisPack() {
+    const pack = buildTopbarDiagnosisPack();
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadJsonFile(`contaibil_diagnosi_${ts}.json`, pack);
+    if (typeof setStatus === "function") setStatus("🧰 Diagnosi scaricata (allega JSON + screenshot)");
+  }
+
+  const btnDebugPack = document.getElementById("btnDebugPack");
+  if (btnDebugPack) btnDebugPack.addEventListener("click", downloadTopbarDiagnosisPack);
+
   // Calcola offset sticky per la seconda riga di header
   // Funziona con selector tr:first-child e tr:nth-child(2)
   function updateStickyHeaderOffsets() {
@@ -169,23 +651,39 @@ window.addEventListener("DOMContentLoaded", () => {
   // editor
   let currentEditRowId = null;
 
-  // ---------- VAT State Storage ----------
-  const VAT_STATE_KEY = "contaibil_vatState_v2";
+  // ---------- VAT State Storage (namespaced per cliente) ----------
+  const VAT_STATE_PREFIX = "contaibil_vatState_v2";
+
+  function getVatStateKey() {
+    const piva = currentClient?.piva ? normalizePIVA(currentClient.piva) : "";
+    return piva ? `${VAT_STATE_PREFIX}:${piva}` : VAT_STATE_PREFIX;
+  }
 
   function loadVatState() {
-    try {
-      const stored = localStorage.getItem(VAT_STATE_KEY);
-      if (!stored) return { openingBalance: 0, months: {} };
-      return JSON.parse(stored);
-    } catch (e) {
-      console.warn("Error loading VAT state:", e);
-      return { openingBalance: 0, months: {} };
+    const key = getVatStateKey();
+    const fallbackKeys = key === VAT_STATE_PREFIX ? [key] : [key, VAT_STATE_PREFIX];
+    for (const k of fallbackKeys) {
+      try {
+        const stored = localStorage.getItem(k);
+        if (!stored) continue;
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === "object") {
+          // Migra il legacy sul nuovo namespace se serve
+          if (k !== key) {
+            saveVatState(parsed);
+          }
+          return parsed;
+        }
+      } catch (e) {
+        console.warn("Error loading VAT state:", e);
+      }
     }
+    return { openingBalance: 0, months: {} };
   }
 
   function saveVatState(state) {
     try {
-      localStorage.setItem(VAT_STATE_KEY, JSON.stringify(state));
+      localStorage.setItem(getVatStateKey(), JSON.stringify(state));
     } catch (e) {
       console.error("Error saving VAT state:", e);
     }
@@ -224,7 +722,56 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   function resetVatState() {
-    localStorage.removeItem(VAT_STATE_KEY);
+    localStorage.removeItem(getVatStateKey());
+  }
+
+  // ---------- CLIENT CONTEXT & BADGE ----------
+  function renderCurrentClientBadge() {
+    const badge = document.getElementById("clientBadge");
+    const nameEl = document.getElementById("clientBadgeName");
+    const pivaEl = document.getElementById("clientBadgePiva");
+
+    if (!badge) return;
+
+    const hasInfo = (currentClient?.piva || currentClient?.name);
+    if (!hasInfo) {
+      badge.classList.add("hidden");
+      if (nameEl) nameEl.textContent = "Cliente non rilevato";
+      if (pivaEl) pivaEl.textContent = "";
+      return;
+    }
+
+    badge.classList.remove("hidden");
+    if (nameEl) nameEl.textContent = currentClient.name || "Cliente ADE";
+    if (pivaEl) pivaEl.textContent = currentClient.piva ? `P.IVA ${currentClient.piva}` : "";
+  }
+
+  function setCurrentClient(piva, name) {
+    const normPiva = piva ? normalizePIVA(piva) : "";
+    const cleanName = (name || "").trim();
+    const changed = (currentClient.piva !== normPiva) || (currentClient.name !== cleanName);
+
+    currentClient = { piva: normPiva, name: cleanName };
+    renderCurrentClientBadge();
+
+    if (!changed) return;
+
+    // Ricarica procedure e stato IVA nel namespace corretto
+    loadProceduresForCurrentClient();
+
+    const vatOpeningInput = document.getElementById("vatOpeningBalance");
+    if (vatOpeningInput) {
+      const state = loadVatState();
+      vatOpeningInput.value = state.openingBalance || 0;
+    }
+
+    try {
+      if (typeof renderVatTableComplete === "function") renderVatTableComplete();
+    } catch (e) { /* ignore */ }
+
+    try {
+      if (typeof renderVatLiquidation === "function") renderVatLiquidation();
+    } catch (e) { /* ignore */ }
   }
 
   // ---------- utils ----------
@@ -525,6 +1072,42 @@ function formatDateIT(input) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+// Converte valori eterogenei (Date, stringa, seriale Excel) in un oggetto Date
+function coerceDate(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (value === null || value === undefined) return null;
+
+  // Numerico o stringa numerica: potrebbe essere un seriale Excel
+  if (typeof value === "number" && !isNaN(value)) {
+    return parseDateFlexible(value);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    // Stringa che rappresenta un numero (es. "45231" come seriale Excel)
+    if (/^-?\d+(?:[.,]\d+)?$/.test(trimmed)) {
+      const num = Number(trimmed.replace(",", "."));
+      if (Number.isFinite(num)) {
+        const fromSerial = parseDateFlexible(num);
+        if (fromSerial) return fromSerial;
+      }
+    }
+
+    const parsed = parseDateFlexible(trimmed);
+    if (parsed) return parsed;
+
+    const jsDate = new Date(trimmed);
+    if (!isNaN(jsDate.getTime())) return jsDate;
+  }
+
+  return null;
+}
+
 // parseDate: usa normalizeDate per capire il formato,
 // poi restituisce SEMPRE un oggetto Date (oppure null)
 // DEPRECATO: usare parseDateFlexible al suo posto
@@ -787,6 +1370,29 @@ function formatDateForUI(dateObj) {
   //   true  = mantiene lettere (es. "F2503919205" -> "F2503919205")
   //   false = solo cifre (es. "F2503919205" -> "2503919205")
   // ============================================================
+  // Rimuove la parte decimale ",00"/".00" se il valore è un numero puro
+  function stripTrailingZeroDecimals(raw) {
+    if (raw === null || raw === undefined) return null;
+
+    const base = String(raw)
+      .trim()
+      .replace(/^['"]|['"]$/g, "")
+      .replace(/\s+/g, "");
+
+    if (!base) return null;
+
+    // Normalizza per il check numerico: togli punti (migliaia) e usa il punto come decimale
+    const numericCandidate = base.replace(/\./g, "").replace(",", ".");
+    if (/^-?\d+(?:\.\d+)?$/.test(numericCandidate)) {
+      const [intPart, fracPart] = numericCandidate.split(".");
+      if (!fracPart || /^0+$/.test(fracPart)) {
+        return intPart; // manteniamo eventuali leading zero (verranno gestiti a valle se serve)
+      }
+    }
+
+    return null;
+  }
+
     function normalizeInvoiceNumber(val, keepLetters = true) {
       if (!val) return "";
 
@@ -798,7 +1404,13 @@ function formatDateForUI(dateObj) {
         .toUpperCase()
         .trim();
 
-      // 2) GESTIONE NOTAZIONE SCIENTIFICA (es. 1,00918E+11)
+        // 2) Se è un numero con decimali fittizi (es. "732025,00"), rimuovi la parte decimale
+        const strippedInteger = stripTrailingZeroDecimals(s);
+        if (strippedInteger !== null) {
+          s = strippedInteger;
+        }
+
+        // 3) GESTIONE NOTAZIONE SCIENTIFICA (es. 1,00918E+11)
       const sciMatch = s.match(/^(\d+(?:[.,]\d+)?)E\+?(\d+)$/i);
       if (sciMatch) {
           try {
@@ -813,16 +1425,16 @@ function formatDateForUI(dateObj) {
           }
       }
 
-      // 3) Rimuovi caratteri speciali comuni nei numeri fattura
+      // 4) Rimuovi caratteri speciali comuni nei numeri fattura
       //    Manteniamo solo alfanumerici (togliamo /, -, _, ecc.)
       s = s.replace(/[^A-Z0-9]/g, "");
 
-      // 4) Se keepLetters è false, rimuovi anche le lettere
+      // 5) Se keepLetters è false, rimuovi anche le lettere
       if (!keepLetters) {
           s = s.replace(/[A-Z]/g, "");
       }
 
-      // 5) Rimuovi zeri iniziali (es. "00123" -> "123")
+      // 6) Rimuovi zeri iniziali (es. "00123" -> "123")
       //    Ma solo se rimane qualcosa dopo la rimozione
       const withoutLeadingZeros = s.replace(/^0+/, "");
       if (withoutLeadingZeros.length > 0) {
@@ -830,6 +1442,33 @@ function formatDateForUI(dateObj) {
       }
 
       return s;
+  }
+
+  // Normalizzazione "soft" per numeri documento (mai formattati come importo)
+  function normalizeDocNumber(val) {
+    if (val === null || val === undefined) return "";
+
+    // Se numero JS e intero → stringa senza decimali
+    if (typeof val === "number" && Number.isFinite(val)) {
+      if (Number.isInteger(val)) return String(val);
+      // Se ha .00, toglili
+      const strippedNum = stripTrailingZeroDecimals(val);
+      return strippedNum !== null ? strippedNum : String(val);
+    }
+
+    let s = String(val)
+      .replace(/^['"]|['"]$/g, "") // rimuovi apici iniziali/finali
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Se contiene una virgola/punto con solo zeri, togli la parte decimale
+    const stripped = stripTrailingZeroDecimals(s);
+    if (stripped !== null) s = stripped;
+
+    // Mai formattare come importo: niente separatori migliaia
+    s = s.replace(/\.(?=\d{3}(\D|$))/g, "");
+
+    return s;
   }
 
     // Applica una regola di trasformazione numero fattura (apprendimento)
@@ -1806,33 +2445,60 @@ function formatDateForUI(dateObj) {
 
   // ---------- GESTIONE PERSISTENZA PROCEDURE (localStorage) ----------
 
-    const LEARNING_STORAGE_KEY = "contaibil_learning_data";
+  const LEARNING_STORAGE_PREFIX = "contaibil_learning_data";
 
-  // prova prima da localStorage, se non trova niente tenta il file JSON accanto all'HTML
-  async function loadProceduresAtStartup() {
-    let loaded = false;
+  function getLearningStorageKey() {
+    const piva = currentClient?.piva ? normalizePIVA(currentClient.piva) : "";
+    return piva ? `${LEARNING_STORAGE_PREFIX}:${piva}` : LEARNING_STORAGE_PREFIX;
+  }
 
-    // 1) Tenta dal localStorage
+  function loadProceduresForCurrentClient() {
     try {
-      const storedData = localStorage.getItem(LEARNING_STORAGE_KEY);
-      if (storedData) {
-        const parsed = JSON.parse(storedData);
-        if (parsed && typeof parsed === "object" && parsed.versione >= 2) {
-          learningData = parsed;
-          ensureLearningShape();
-          refreshLearningPanel();
-          console.log("Procedure caricate automaticamente dal localStorage.");
-          loaded = true;
-        }
+      const key = getLearningStorageKey();
+      const fallbackKey = LEARNING_STORAGE_PREFIX;
+      const storedData = localStorage.getItem(key) || (key !== fallbackKey ? localStorage.getItem(fallbackKey) : null);
+      if (!storedData) return false;
+
+      const parsed = JSON.parse(storedData);
+      if (parsed && typeof parsed === "object" && parsed.versione >= 2) {
+        learningData = parsed;
+        ensureLearningShape();
+        refreshLearningPanel();
+        console.log(`Procedure caricate automaticamente dal namespace ${key}.`);
+        return true;
       }
     } catch (e) {
       console.error("Errore nel caricamento delle procedure dal localStorage:", e);
     }
+    return false;
+  }
+
+  // prova prima da localStorage, se non trova niente tenta il file JSON accanto all'HTML
+  async function loadProceduresAtStartup() {
+    let loaded = loadProceduresForCurrentClient();
 
     if (loaded) return;
 
     // 2) Se non ho trovato nulla nel localStorage, provo a leggere il file JSON accanto all'HTML
     try {
+      // Evita fetch in contesto file:// (CORS/Access-Control non permesso)
+      if (location.protocol === 'file:') {
+        console.info("Procedura non caricata in file://. Usa Netlify/Live Server oppure carica manualmente.");
+        pushDebugLog("info", { type: "procedures", message: "Skip fetch in file://, using embedded default procedures." });
+        // Procedura embedded minima per evitare errori
+        const embedded = {
+          versione: 2,
+          azienda: "STANDARD",
+          columns: { ADE: {}, GEST: {}, GEST_B: {}, GEST_C: {} },
+          rules: [],
+          supplierPivaMap: {}
+        };
+        learningData = embedded;
+        ensureLearningShape();
+        refreshLearningPanel();
+        try { localStorage.setItem(getLearningStorageKey(), JSON.stringify(learningData)); } catch (_) {}
+        return;
+      }
       const resp = await fetch(DEFAULT_PROCEDURE_FILENAME, { cache: "no-store" });
       if (!resp.ok) {
         console.log("Nessun file procedure JSON trovato accanto all'HTML:", DEFAULT_PROCEDURE_FILENAME);
@@ -1846,7 +2512,7 @@ function formatDateForUI(dateObj) {
         console.log("Procedure caricate dal file JSON:", DEFAULT_PROCEDURE_FILENAME);
         // salvo anche nel localStorage per le aperture successive
         try {
-          localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(learningData));
+          localStorage.setItem(getLearningStorageKey(), JSON.stringify(learningData));
         } catch (e2) {
           console.warn("Impossibile salvare le procedure nel localStorage:", e2);
         }
@@ -1876,8 +2542,8 @@ function formatDateForUI(dateObj) {
 
         // 1) Salva nel localStorage per la persistenza automatica
         try {
-          localStorage.setItem(LEARNING_STORAGE_KEY, dataStr);
-          console.log("Procedure salvate nel localStorage.");
+          localStorage.setItem(getLearningStorageKey(), dataStr);
+          console.log("Procedure salvate nel localStorage (namespace cliente).");
         } catch (e) {
           console.error("Errore nel salvataggio su localStorage:", e);
         }
@@ -1923,7 +2589,7 @@ function formatDateForUI(dateObj) {
 
               // aggiorno anche il localStorage per coerenza
               try {
-                localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(learningData));
+                localStorage.setItem(getLearningStorageKey(), JSON.stringify(learningData));
               } catch (e2) {
                 console.warn("Impossibile salvare le procedure nel localStorage dopo il load:", e2);
               }
@@ -2042,12 +2708,21 @@ function formatDateForUI(dateObj) {
     // ✅ FIX: converti seriali Excel in DATE solo nelle colonne "Data..."
     const headerRow = range.s.r; // prima riga del foglio (header)
     const dateCols = new Set();
+    const amountCols = new Set(); // Colonne importo (applica .toFixed(2))
+    const idCols = new Set();     // Colonne ID/numero documento (NO .toFixed(2))
 
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const addr = XLSX.utils.encode_cell({ r: headerRow, c: C });
       const cell = ws[addr];
       const header = String(cell?.v ?? cell?.w ?? "").toLowerCase().trim();
-      if (header.includes("data")) dateCols.add(C);
+      
+      if (header.includes("data")) {
+        dateCols.add(C);
+      } else if (header.match(/importo|imponibile|imposta|iva|totale|tot\b|aliquota|tassa|sconto|prezzo|costo|lordo|netto|competenza|dovuto|versato|credito|debito|saldo/i)) {
+        amountCols.add(C);
+      } else if (header.match(/numero|num|doc|documento|fattura|causale|progressivo|id\b|protocollo|protoc|bolla|lista|ordine|art\b|causale|causale/i)) {
+        idCols.add(C);
+      }
     }
 
     for (let R = range.s.r; R <= range.e.r; ++R) {
@@ -2079,27 +2754,40 @@ function formatDateForUI(dateObj) {
 
             delete cell.z; // rimuovi formato numero
           }
-          // CASO 2: TUTTI gli altri numeri (importi, IVA, totali, quantità)
-          // Include sia decimali (610.75) che interi (887)
-          else {
+          // CASO 2: Colonne IMPORTO (IVA, tot, imponibile, etc.) → applica .toFixed(2)
+          else if (amountCols.has(C)) {
             let strValue;
-
             if (isADE) {
-              // ⚠️ FILE ADE: mantieni formato AMERICANO con PUNTO decimale
-              // I file ADE dall'Agenzia delle Entrate hanno già il punto decimale
-              // Es: 195.14 → "195.14" (NO conversione)
-              strValue = numValue.toFixed(2);
+              strValue = numValue.toFixed(2); // Formato americano punto
             } else {
-              // ✅ FILE GESTIONALE: converti in formato ITALIANO con VIRGOLA decimale
-              // Es: 887 → 887.00 → "887,00"
-              strValue = numValue.toFixed(2).replace('.', ',');
+              strValue = numValue.toFixed(2).replace('.', ','); // Formato italiano virgola
             }
-
-            cell.t = 's'; // cambia tipo a stringa
+            cell.t = 's';
             cell.v = strValue;
             cell.w = strValue;
-
-            delete cell.z; // rimuovi formato numero
+            delete cell.z;
+          }
+          // CASO 3: Colonne ID/NUMERO DOCUMENTO → NO .toFixed(2), solo toString
+          else if (idCols.has(C)) {
+            // Converti a stringa senza decimali
+            let strValue = String(Math.round(numValue)); // Arrotonda a intero se numero
+            cell.t = 's';
+            cell.v = strValue;
+            cell.w = strValue;
+            delete cell.z;
+          }
+          // CASO 4: Altre colonne numeriche (quantità, percentuali sconosciute, etc.)
+          else {
+            let strValue;
+            if (isADE) {
+              strValue = numValue.toFixed(2);
+            } else {
+              strValue = numValue.toFixed(2).replace('.', ',');
+            }
+            cell.t = 's';
+            cell.v = strValue;
+            cell.w = strValue;
+            delete cell.z;
           }
         }
       }
@@ -2552,6 +3240,7 @@ function formatDateForUI(dateObj) {
   const colPivaFor = cfg.piva || findCol(H, h, "partita iva fornitore", "partita iva cedente", "partita iva cedente / prestatore");
   const colPivaCli = findCol(H, h, "partita iva cliente");
   const colDenFor  = cfg.den || findCol(H, h, "denominazione fornitore", "denominazione cedente", "denominazione cedente / prestatore");
+  const colDenCli  = findCol(H, h, "denominazione cliente", "denominazione cessionario", "denominazione cessionario / committente", "denominazione cessionario/committente");
   
   // ============================================================
   // 🔧 FIX MAPPING IMPORTI ADE - indexOf() con nomi esatti
@@ -2714,10 +3403,34 @@ function formatDateForUI(dateObj) {
   });
 
   const recs = [];
+  const clientPivaFreq = new Map();
+  const clientNameFreq = new Map();
   for (const r of parsed.rows) {
-    const num  = r[colNum]    || "";
+    let num  = r[colNum]    || "";
+    num = normalizeDocNumber(num);
     const den  = r[colDenFor] || "";
     const piva = r[colPivaFor] || r[colPivaCli] || "";
+
+    // Tally cliente (Partita IVA / Denominazione) per badge e namespace
+    const clientPivaRaw = colPivaCli ? (r[colPivaCli] || "") : "";
+    const clientDenRaw  = colDenCli ? (r[colDenCli]  || "") : "";
+    const clientPivaNorm = normalizePIVA(clientPivaRaw);
+    if (clientPivaNorm) {
+      clientPivaFreq.set(clientPivaNorm, (clientPivaFreq.get(clientPivaNorm) || 0) + 1);
+    }
+    const clientDenNorm = normalizeName(clientDenRaw);
+    if (clientDenNorm) {
+      const existing = clientNameFreq.get(clientDenNorm) || { count: 0, sample: clientDenRaw.toString().trim() };
+      existing.count += 1;
+      if (!existing.sample && clientDenRaw) existing.sample = clientDenRaw.toString().trim();
+      clientNameFreq.set(clientDenNorm, existing);
+    }
+
+    // 📦 DEBUG: Aggiorna profilo azienda per debug pack (prima riga con dati validi)
+    if (diagCompany.pivaCliente === "" && clientPivaNorm) {
+      diagCompany = { pivaCliente: clientPivaNorm, denCliente: clientDenNorm || "" };
+      diagMark("ADE.companyDetected", diagCompany);
+    }
 
     // Tipo documento ADE normalizzato (serve per gestione segno NC)
     const tipoDocRaw = (colTipo ? (r[colTipo] || "") : "").toString().toUpperCase();
@@ -2784,35 +3497,31 @@ function formatDateForUI(dateObj) {
     // ============================================================
 
     const tipoDoc = (tipoDocRaw || "").trim().toUpperCase();
-    const isTD04 = (tipoDoc === "TD04");
-
-    // segnali “nota credito” anche senza TD04
-    const isNCByTipo = tipoDoc.includes("TD04") || tipoDoc.includes("NOTA") || tipoDoc.includes("NC");
-    const isNCBySign = (impParsed < 0) || (ivaParsed < 0);
+    const isNC = tipoDoc.includes("TD04") || tipoDoc.includes("NOTA DI CREDITO") || tipoDoc.includes("NOTA CREDITO");
 
     let imp = impParsed;
     let iva = ivaParsed;
     let adeTechNote = "";
 
-    // 1) Se è TD04 (o nota credito per tipo) e gli importi sono positivi, rendili negativi
-    //    Se sono già negativi, NON toccare (no double-negation)
-    if (isTD04 || isNCByTipo) {
-      if (imp > 0) imp = -imp;
-      if (iva > 0) iva = -iva;
-    }
-
-    // 2) Se ADE arriva già con segno negativo (anche senza tipoDoc), lo rispettiamo SEMPRE
-    //    (questa è la parte che ti salva TIM/ENI e tutte le righe con tipo documento ambiguo)
-    if (isNCBySign) {
-      imp = -Math.abs(imp);
-      iva = -Math.abs(iva);
-    }
-
-    // LOG DIAGNOSTICO (solo per righe potenzialmente NC)
-    if (isTD04 || isNCByTipo || isNCBySign) {
-      console.log(
-        `🧾 NC_CHECK [${num}] tipo="${tipoDocRaw}" impRaw=${impRaw} ivaRaw=${ivaRaw} -> imp=${imp} iva=${iva}`
-      );
+    if (isNC) {
+      imp = -Math.abs(impParsed);
+      iva = -Math.abs(ivaParsed);
+    } else {
+      const anomaly = (impParsed < 0 && ivaParsed >= 0) || (impParsed > 0 && ivaParsed < 0);
+      if (anomaly) {
+        signAnomalies.push({
+          src: "ADE_ACQ",
+          num,
+          den,
+          piva,
+          dataIso,
+          imp: impParsed,
+          iva: ivaParsed,
+          tipoDoc
+        });
+        if (signAnomalies.length > 200) signAnomalies.shift();
+        console.warn("SIGN_ANOMALY", { num, den, piva, imp: impParsed, iva: ivaParsed, tipoDoc });
+      }
     }
 
     // Totale coerente con i valori ADE normalizzati
@@ -2886,6 +3595,13 @@ function formatDateForUI(dateObj) {
   const sumIva = recs.reduce((acc, r) => acc + (r.iva || 0), 0);
   console.log("✅ ADE check interno - somma imponibile (con NC negative):", sumImp.toFixed(2));
   console.log("✅ ADE check interno - somma IVA (con NC negative):", sumIva.toFixed(2));
+
+  // Aggiorna contesto cliente usando le colonne cliente più frequenti (se presenti)
+  const topPivaEntry = Array.from(clientPivaFreq.entries()).sort((a, b) => b[1] - a[1])[0];
+  const topNameEntry = Array.from(clientNameFreq.entries()).sort((a, b) => b[1].count - a[1].count)[0];
+  const bestPiva = topPivaEntry ? topPivaEntry[0] : "";
+  const bestName = topNameEntry ? (topNameEntry[1].sample || topNameEntry[0]) : "";
+  setCurrentClient(bestPiva, bestName);
 
   return recs;
 }
@@ -3040,6 +3756,8 @@ for (const r of parsed.rows) {
     }
   }
 
+  num = normalizeDocNumber(num);
+
   const den  = colDen  ? (r[colDen]  || "") : "";
   const piva = colPiva ? (r[colPiva] || "") : "";
 
@@ -3054,12 +3772,20 @@ for (const r of parsed.rows) {
   // ===== GESTIONE IMPORTI CON VALIDAZIONE IVA =====
   let imp = colImp ? parseNumberIT(r[colImp]) : 0;
   let iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;  // Valida IVA vs P.IVA
-
   let tot = 0;
   if (colTot) {
     tot = parseNumberIT(r[colTot]);
   } else {
     tot = +(imp + iva).toFixed(2);
+  }
+
+  // ✅ TASK5: Se colonna IVA mancante o valore nullo, derivala da Totale - Imponibile (solo Gestionale)
+  let ivaDerived = false;
+  const ivaRaw = colIva ? r[colIva] : undefined;
+  const ivaMissing = (!colIva) || ivaRaw === undefined || ivaRaw === null || String(ivaRaw).trim() === "" || String(ivaRaw).toLowerCase() === "null";
+  if (ivaMissing && colTot) {
+    const derived = +(tot - imp).toFixed(2);
+    if (!isNaN(derived)) { iva = derived; ivaDerived = true; }
   }
 
   // ✅ FIX NC Gestionale: se il file è una Nota Credito, forziamo segno negativo
@@ -3112,6 +3838,7 @@ for (const r of parsed.rows) {
     iva,
     tot,
     isNC,
+    ivaDerived,
     isForeign: isForeignPiva(piva)
   });
 }
@@ -3257,6 +3984,8 @@ function buildGestNcRecords(parsed, options = {}) {
       }
     }
 
+    num = normalizeDocNumber(num);
+
     const den  = colDen  ? (r[colDen]  || "") : "";
     const piva = colPiva ? (r[colPiva] || "") : "";
 
@@ -3378,10 +4107,31 @@ function buildAdeSalesRecords(parsed) {
   const colTipo = findCol(H, h, "tipo documento");
 
   const recs = [];
+  const clientPivaFreq = new Map();
+  const clientNameFreq = new Map();
   for (const r of parsed.rows) {
-    const num = r[colNum] || "";
+    let num = r[colNum] || "";
+    num = normalizeDocNumber(num);
     const den = colDenCli ? (r[colDenCli] || "") : "";
     const piva = colPivaCli ? (r[colPivaCli] || "") : "";
+
+    const clientPivaNorm = normalizePIVA(piva);
+    if (clientPivaNorm) {
+      clientPivaFreq.set(clientPivaNorm, (clientPivaFreq.get(clientPivaNorm) || 0) + 1);
+    }
+    const clientDenNorm = normalizeName(den);
+    if (clientDenNorm) {
+      const existing = clientNameFreq.get(clientDenNorm) || { count: 0, sample: den.toString().trim() };
+      existing.count += 1;
+      if (!existing.sample && den) existing.sample = den.toString().trim();
+      clientNameFreq.set(clientDenNorm, existing);
+    }
+
+    // Aggiorna profilo azienda cliente se non già rilevato
+    if (diagCompany.pivaCliente === "" && clientPivaNorm) {
+      diagCompany = { pivaCliente: clientPivaNorm, denCliente: clientDenNorm || den || "" };
+      diagMark("ADE_SALES.companyDetected", diagCompany);
+    }
 
     // Date: per vendite, base = emissione; fallback ricezione
     const dataRawEmiss = colDataEmiss ? (r[colDataEmiss] || "") : "";
@@ -3402,16 +4152,18 @@ function buildAdeSalesRecords(parsed) {
     let iva = cleanIVAValue(r[colIva], piva);
 
     const tipoDocRaw = (colTipo ? (r[colTipo] || "") : "").toString().toUpperCase();
-    const isNCByTipo = tipoDocRaw.includes("TD04") || tipoDocRaw.includes("NOTA") || tipoDocRaw.includes("NC");
-    const isNCBySign = (imp < 0) || (iva < 0);
+    const isNC = tipoDocRaw.includes("TD04") || tipoDocRaw.includes("NOTA DI CREDITO") || tipoDocRaw.includes("NOTA CREDITO");
 
-    if (isNCByTipo) {
-      if (imp > 0) imp = -imp;
-      if (iva > 0) iva = -iva;
-    }
-    if (isNCBySign) {
+    if (isNC) {
       imp = -Math.abs(imp);
       iva = -Math.abs(iva);
+    } else {
+      const anomaly = (imp < 0 && iva >= 0) || (imp > 0 && iva < 0);
+      if (anomaly) {
+        signAnomalies.push({ src: "ADE_VEN", num, den, piva, dataIso, imp, iva, tipoDoc: tipoDocRaw });
+        if (signAnomalies.length > 200) signAnomalies.shift();
+        console.warn("SIGN_ANOMALY", { num, den, piva, imp, iva, tipoDoc: tipoDocRaw });
+      }
     }
 
     let tot = +(imp + iva).toFixed(2);
@@ -3440,6 +4192,15 @@ function buildAdeSalesRecords(parsed) {
       isForeign: isForeignPiva(piva)
     });
   }
+
+  const topPivaEntry = Array.from(clientPivaFreq.entries()).sort((a, b) => b[1] - a[1])[0];
+  const topNameEntry = Array.from(clientNameFreq.entries()).sort((a, b) => b[1].count - a[1].count)[0];
+  const bestPiva = topPivaEntry ? topPivaEntry[0] : "";
+  const bestName = topNameEntry ? (topNameEntry[1].sample || topNameEntry[0]) : "";
+  if (bestPiva || bestName) {
+    setCurrentClient(bestPiva || currentClient.piva, bestName || currentClient.name);
+  }
+
   return recs;
 }
 
@@ -3505,6 +4266,8 @@ function buildGestSalesRecords(parsed, options = {}) {
       if (s2 && !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s2)) num = s2;
     }
 
+    num = normalizeDocNumber(num);
+
     const den = colDen ? (r[colDen] || "") : "";
     const piva = colPiva ? (r[colPiva] || "") : "";
 
@@ -3516,6 +4279,15 @@ function buildGestSalesRecords(parsed, options = {}) {
     let imp = colImp ? parseNumberIT(r[colImp]) : 0;
     let iva = colIva ? cleanIVAValue(r[colIva], piva) : 0;
     let tot = colTot ? parseNumberIT(r[colTot]) : +(imp + iva).toFixed(2);
+
+    // ✅ TASK5: Se IVA mancante/null oppure colonna IVA assente, derivala da Totale - Imponibile (solo Gestionale)
+    let ivaDerived = false;
+    const ivaRaw = colIva ? r[colIva] : undefined;
+    const ivaMissing = (!colIva) || ivaRaw === undefined || ivaRaw === null || String(ivaRaw).trim() === "" || String(ivaRaw).toLowerCase() === "null";
+    if (ivaMissing && colTot) {
+      const derived = +(tot - imp).toFixed(2);
+      if (!isNaN(derived)) { iva = derived; ivaDerived = true; }
+    }
 
     if (isGestNotesCredit) {
       imp = -Math.abs(imp);
@@ -3542,6 +4314,7 @@ function buildGestSalesRecords(parsed, options = {}) {
       iva,
       tot,
       isNC: isGestNotesCredit,
+      ivaDerived,
       isForeign: isForeignPiva(piva)
     });
   }
@@ -5097,7 +5870,8 @@ tr.appendChild(tdText(a ? a.iva.toFixed(2) : "", "mono"));
 tr.appendChild(tdText(a ? a.tot.toFixed(2) : "", "mono"));
 
 // GEST
-tr.appendChild(tdText(g ? g.num : "", "mono"));
+const gestNumDisplay = g ? String(g.num || "").trim().replace(/[\s,]+$/, "") : "";
+tr.appendChild(tdText(gestNumDisplay, "mono"));
 tr.appendChild(tdText(g ? g.den : ""));
 
 // 🌟 Conversione data Gestionale: usa dataIso normalizzato in formato italiano DD/MM/YYYY
@@ -5721,7 +6495,9 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     if (currentMonthFilter) {
       filtered = filtered.filter(r => {
         if (!r.ADE || !r.ADE.data) return false;
-        return monthKeyFromDate(r.ADE.data) === currentMonthFilter;
+        const key = monthKeyFromDate(r.ADE.data);
+        if (!key) return false;
+        return key === currentMonthFilter;
       });
     }
 
@@ -6020,7 +6796,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     if (r.deleted) continue;
     if (!r.ADE || !r.ADE.data) continue;
     const key = monthKeyFromDate(r.ADE.data);
-    monthSet.add(key);
+    if (key) monthSet.add(key);
   }
 
   // Svuota e ricostruisci le opzioni
@@ -6191,6 +6967,18 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       });
       lastAdeRecords = adeRecords;
       lastGestRecords = gestRecords;
+      // Aggiorna anche lo state globale
+      try {
+        window.state.lastAdePurchases = adeRecords;
+        window.state.lastGestPurchases = gestRecords;
+      } catch (_) {}
+
+      // 🔹 Aggiornamento immediato UI liquidazione
+      if (typeof refreshVatUI === "function") {
+        try { refreshVatUI(); } catch (e) { console.warn("refreshVatUI error:", e); }
+      } else if (typeof renderVatLiquidation === "function") {
+        try { renderVatLiquidation(); } catch (_) {}
+      }
 
       // aggiorna copertura periodo
       updatePeriodCoverage(adeRecords, gestRecords);
@@ -6201,6 +6989,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       }
 
       lastResults = matchRecords(adeRecords, gestRecords);
+      try { window.state.lastResults = lastResults; } catch (_) {}
       
       // 🔍 Post-processing: flagga casi sospetti SOLO_ADE/SOLO_GEST
       lastResults = flagSuspiciousSoloAdeSoloGest(lastResults);
@@ -6591,11 +7380,13 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     editRowInfo.textContent = `Riga #${row.rowId} – Stato attuale: ${row.STATUS}`;
 
     editBackdrop.classList.remove("hidden");
+    document.body.classList.add("modal-open");
   }
 
   function closeEditPanel() {
     currentEditRowId = null;
     editBackdrop.classList.add("hidden");
+    document.body.classList.remove("modal-open");
   }
 
   function saveEditPanel() {
@@ -6790,7 +7581,9 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     if (salesMonthFilter) {
       filtered = filtered.filter(r => {
         if (!r.ADE || !r.ADE.data) return false;
-        return monthKeyFromDate(r.ADE.data) === salesMonthFilter;
+        const key = monthKeyFromDate(r.ADE.data);
+        if (!key) return false;
+        return key === salesMonthFilter;
       });
     }
 
@@ -6905,7 +7698,8 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       tr.appendChild(tdText(a ? a.tot.toFixed(2) : "", "mono"));
 
       // GEST
-      tr.appendChild(tdText(g ? g.num : "", "mono"));
+      const gestNumDisplay = g ? String(g.num || "").trim().replace(/[\s,]+$/, "") : "";
+      tr.appendChild(tdText(gestNumDisplay, "mono"));
       tr.appendChild(tdText(g ? g.den : ""));
       const gestDateDisplay = g ? (g.dataIso ? formatDateIT(g.dataIso) : (g.dataStr || "")) : "";
       tr.appendChild(tdText(gestDateDisplay, "mono"));
@@ -7049,12 +7843,23 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
         totalGestSalesCount = gestAll.length;
         lastAdeSalesRecords = adeSales;
         lastGestSalesRecords = gestAll;
+        // Aggiorna anche lo state globale
+        try {
+          window.state.lastAdeSales = adeSales;
+          window.state.lastGestSales = gestAll;
+        } catch (_) {}
+
+        // 🔹 Aggiorna UI liquidazione dopo import vendite
+        if (typeof refreshVatUI === "function") {
+          try { refreshVatUI(); } catch (e) { console.warn("refreshVatUI error:", e); }
+        }
 
         let results = matchRecords(adeSales, gestAll);
         results = flagSuspiciousSoloAdeSoloGest(results);
         nextSalesResultId = 1;
         results.forEach(r => { r.id = nextSalesResultId++; r.rowId = r.id; r.deleted = false; r.matchNote = r.matchNote || ""; });
         lastSalesResults = results;
+        try { window.state.lastSalesResults = results; } catch (_) {}
         originalSalesResults = JSON.parse(JSON.stringify(results));
 
         // Popola dropdown mesi vendite
@@ -7103,7 +7908,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     for (const r of (lastSalesResults || [])) {
       if (!r.ADE || !r.ADE.data) continue;
       const key = monthKeyFromDate(r.ADE.data);
-      monthSet.add(key);
+      if (key) monthSet.add(key);
     }
 
     salesMonthFilterSelect.innerHTML = "";
@@ -7480,6 +8285,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 
   refreshLearningPanel();
   refreshFlowUI();
+  renderCurrentClientBadge();
 
   function buildAiCopyPayload(row) {
       if (!row) return null;
@@ -7547,8 +8353,13 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
 // ===============================================================
 
 function monthKeyFromDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const date = coerceDate(d);
+  if (!date) return null;
+
+  const y = date.getFullYear();
+  if (!Number.isFinite(y)) return null;
+
+  const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
 
@@ -7573,6 +8384,7 @@ function computePeriodKpi(results) {
       const g = r.GEST;
       if (g?.data) {
         const key = monthKeyFromDate(g.data);
+        if (!key) continue;
         if (!map.has(key)) {
           map.set(key, {
             key,
@@ -7592,12 +8404,12 @@ function computePeriodKpi(results) {
     // 🔹 Per tutti gli altri record, usa la data ADE
     const a = r.ADE;
     if (!a?.data) continue;
+    const key = monthKeyFromDate(a.data);
+    if (!key) continue;
 
     // 🔹 fuori perimetro: fatture ADE senza P.IVA italiana (es. estero)
     const pivaDigits = (a.piva ? onlyDigits(a.piva) : "");
     const isItalian = pivaDigits.length === 11;
-
-    const key = monthKeyFromDate(a.data);
     if (!map.has(key)) {
       map.set(key, {
         key,
@@ -7776,10 +8588,10 @@ function renderPeriodKpi(results) {
   function getVatIsoFromRecord(r, basis) {
     if (!r) return "";
     const b = String(basis || "RICEZIONE").toUpperCase();
-    if (b === "EMISSIONE") return r.dataEmissIso || "";
-    if (b === "AUTO") return r.vatDateIso || r.dataRicezIso || r.dataEmissIso || "";
-    // RICEZIONE (default): ricezione -> fallback emissione
-    return r.dataRicezIso || r.vatDateIso || r.dataEmissIso || "";
+    if (b === "EMISSIONE") return r.dataEmissIso || r.dataIso || "";
+    if (b === "AUTO") return r.vatDateIso || r.dataRicezIso || r.dataEmissIso || r.dataIso || "";
+    // RICEZIONE (default): ricezione -> fallback emissione -> dataIso
+    return r.dataRicezIso || r.vatDateIso || r.dataEmissIso || r.dataIso || "";
   }
 
   function detectVatTargetYear(records, basis) {
@@ -7846,6 +8658,8 @@ function renderPeriodKpi(results) {
 
 
   function renderVatLiquidation() {
+    diagMark("VAT.render.start");
+    
     const tbody = document.getElementById("vatTbody");
     const elImp = document.getElementById("vatTotImp");
     const elIva = document.getElementById("vatTotIva");
@@ -7889,6 +8703,7 @@ function renderPeriodKpi(results) {
     }
 
     const vat = buildVatGroups(lastAdeRecords, basis, includePrevYear);
+    diagMark("VAT.compute.done", { months: vat.keys ? vat.keys.length : 0 });
 
     // KPI (stesso perimetro della tabella)
     if (elImp) elImp.textContent = "€ " + formatNumberITDisplay(vat.grandImp);
@@ -7901,6 +8716,7 @@ function renderPeriodKpi(results) {
       return;
     }
 
+    diagMark("VAT.render.table");
     vat.keys.forEach(key => {
       const g = vat.groups[key];
       const tr = document.createElement("tr");
@@ -7944,20 +8760,33 @@ function renderPeriodKpi(results) {
    */
   function computeMonthlyVatComplete() {
     const lsBasisKey = "contaibl-vat-date-basis";
+    const lsPrevKey = "contaibl-vat-include-prev-year";
     let basis = (localStorage.getItem(lsBasisKey) || "RICEZIONE").toUpperCase();
     const selBasis = document.getElementById("vatDateBasis");
     if (selBasis) basis = String(selBasis.value || basis).toUpperCase();
 
     const basisSales = "EMISSIONE"; // Per vendite usiamo sempre emissione
+    let includePrevYear = localStorage.getItem(lsPrevKey) === "true";
+    const cbPrev = document.getElementById("vatIncludePrevYear");
+    if (cbPrev) includePrevYear = cbPrev.checked;
 
     const monthlyMap = new Map();
 
+    const hasPurchases = Array.isArray(lastAdeRecords) && lastAdeRecords.length > 0;
+    const targetYear = hasPurchases
+      ? detectVatTargetYear(lastAdeRecords, basis)
+      : detectVatTargetYear(lastAdeSalesRecords || [], basisSales);
+
     // 1. ACQUISTI (IVA a CREDITO)
     (lastAdeRecords || []).forEach(rec => {
-      const date = getVatDateForRecordHelper(rec, basis);
-      if (!date) return;
-      
-      const key = monthKeyFromDate(date);
+      const iso = getVatIsoFromRecord(rec, basis);
+      const year = getYearFromIso(iso);
+      if (!iso || !year) return;
+      if (year !== targetYear && !(includePrevYear && year === targetYear - 1)) return;
+
+      const date = parseDateFlexible(iso) || coerceDate(iso);
+      const key = date ? monthKeyFromDate(date) : (iso.slice(0,7) || null);
+      if (!key || key.length < 7) return;
       if (!monthlyMap.has(key)) {
         monthlyMap.set(key, {
           mese: key,
@@ -7975,10 +8804,14 @@ function renderPeriodKpi(results) {
 
     // 2. VENDITE (IVA a DEBITO)
     (lastAdeSalesRecords || []).forEach(rec => {
-      const date = getVatDateForRecordHelper(rec, basisSales);
-      if (!date) return;
-      
-      const key = monthKeyFromDate(date);
+      const iso = getVatIsoFromRecord(rec, basisSales);
+      const year = getYearFromIso(iso);
+      if (!iso || !year) return;
+      if (year !== targetYear && !(includePrevYear && year === targetYear - 1)) return;
+
+      const date = parseDateFlexible(iso) || coerceDate(iso);
+      const key = date ? monthKeyFromDate(date) : (iso.slice(0,7) || null);
+      if (!key || key.length < 7) return;
       if (!monthlyMap.has(key)) {
         monthlyMap.set(key, {
           mese: key,
@@ -8012,43 +8845,36 @@ function renderPeriodKpi(results) {
     months.forEach(m => {
       const monthBalance = m.saldoIva;
       const gross = carryIn + monthBalance;
-      
-      // F24 pagato (limitato al gross se positivo)
-      let f24Paid = getMonthState(m.mese).f24Paid || 0;
-      
-      if (gross <= 0) {
-        // Se in credito, F24 deve essere 0
-        f24Paid = 0;
-        if (getMonthState(m.mese).f24Paid > 0) {
-          setMonthF24Paid(m.mese, 0); // Forza a 0 nello storage
-        }
-      } else {
-        // Clamp F24 a max gross
-        f24Paid = Math.min(f24Paid, gross);
-      }
-      
-      // Running balance dopo pagamento
-      let running = gross - f24Paid;
-      
+
+      // F24 pagato (user) e applicazione solo in debito
+      const f24User = getMonthState(m.mese).f24Paid || 0;
+      const f24Effective = gross > 0 ? Math.min(f24User, gross) : 0;
+      const overpay = gross > 0 && f24User - gross > 0.01;
+
+      // Running balance dopo pagamento effettivo
+      let running = gross - f24Effective;
+
       // Tolleranza per arrotondamento
       if (Math.abs(running) < 0.01) {
         running = 0;
       }
-      
+
       // Auto-chiusura se running è 0
       const paidAuto = (running === 0 && gross > 0);
       if (paidAuto && !getMonthState(m.mese).paid) {
         setMonthPaid(m.mese, true, new Date().toISOString());
       }
-      
+
       // Aggiorna oggetto mese
       m.carryIn = carryIn;
       m.gross = gross;
-      m.f24Paid = f24Paid;
+      m.f24Paid = f24User;
+      m.f24Effective = f24Effective;
+      m.f24Overpay = overpay;
       m.running = running;
       m.paidAuto = paidAuto;
       m.paid = getMonthState(m.mese).paid || paidAuto;
-      
+
       // Carry per mese successivo
       carryIn = running;
     });
@@ -8060,12 +8886,31 @@ function renderPeriodKpi(results) {
    * Helper: ottieni data per competenza IVA
    */
   function getVatDateForRecordHelper(rec, basis) {
-    if (basis === "EMISSIONE") return rec.dataEmissione || rec.data;
-    if (basis === "RICEZIONE") return rec.dataRicezione || rec.data;
-    if (basis === "AUTO") {
-      return rec.dataRicezione || rec.dataEmissione || rec.data;
+    if (!rec) return null;
+    const iso = getVatIsoFromRecord(rec, basis);
+    if (iso) {
+      const dIso = parseDateFlexible(iso) || coerceDate(iso);
+      if (dIso) return dIso;
     }
-    return rec.data;
+
+    const pick = (...vals) => {
+      for (const v of vals) {
+        const d = coerceDate(v);
+        if (d) return d;
+      }
+      return null;
+    };
+
+    if (basis === "EMISSIONE") {
+      return pick(rec.dataEmissione, rec.dataEmissIso, rec.dataIso, rec.vatDate, rec.vatDateIso, rec.data);
+    }
+    if (basis === "RICEZIONE") {
+      return pick(rec.dataRicezione, rec.dataRicezIso, rec.dataIso, rec.vatDate, rec.vatDateIso, rec.data);
+    }
+    if (basis === "AUTO") {
+      return pick(rec.vatDate, rec.dataRicezione, rec.dataRicezIso, rec.dataEmissione, rec.dataEmissIso, rec.dataIso, rec.data);
+    }
+    return pick(rec.vatDate, rec.dataIso, rec.data);
   }
 
   /**
@@ -8122,7 +8967,8 @@ function renderPeriodKpi(results) {
 
       // Input F24
       const inputDisabled = m.gross <= 0 ? 'disabled' : '';
-      const f24InputHtml = `<input type="number" class="vat-f24-input" data-month="${m.mese}" value="${m.f24Paid.toFixed(2)}" step="0.01" min="0" ${inputDisabled} />`;
+      const overpayClass = m.f24Overpay ? 'vat-f24-overpay' : '';
+      const f24InputHtml = `<input type="number" class="vat-f24-input ${overpayClass}" data-month="${m.mese}" value="${m.f24Paid.toFixed(2)}" step="0.01" min="0" ${inputDisabled} />`;
 
       tr.innerHTML = `
         <td>${monthLabelFromKey(m.mese)}</td>
@@ -8130,7 +8976,6 @@ function renderPeriodKpi(results) {
         <td style="text-align:right" class="num">${formatNumberITDisplay(m.ivaVen)}</td>
         <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.saldoIva)}</td>
         <td style="text-align:right" class="num">${formatNumberITDisplay(m.carryIn)}</td>
-        <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.gross)}</td>
         <td style="text-align:center">${f24InputHtml}</td>
         <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.running)}</td>
         <td style="text-align:center">${badgeClosed}</td>
@@ -8156,11 +9001,6 @@ function renderPeriodKpi(results) {
         if (amount < 0) amount = 0;
         
         // Trova il gross del mese per clamp max
-        const monthData = months.find(m => m.mese === monthKey);
-        if (monthData && monthData.gross > 0) {
-          amount = Math.min(amount, monthData.gross);
-        }
-        
         setMonthF24Paid(monthKey, amount);
         renderVatTableComplete(); // Re-render per ricalcolare
       });
@@ -8191,6 +9031,22 @@ function renderPeriodKpi(results) {
     if (stepVen) stepVen.textContent = lastAdeSalesRecords.length > 0 ? "✅ Caricato" : "⚠️ Mancante";
   }
 
+  // ============================================================
+  // 🔄 REFRESH UI LIQUIDAZIONE
+  // ============================================================
+  function refreshVatUI() {
+    // Aggiorna KPI e tabella modalità acquisti
+    try { if (typeof renderVatLiquidation === "function") renderVatLiquidation(); } catch (_) {}
+
+    // Se modalità COMPLETA selezionata (o elemento assente), aggiorna tabella completa
+    try {
+      const modeCompEl = document.getElementById("vatModeCompleta");
+      if (!modeCompEl || modeCompEl.checked) {
+        if (typeof renderVatTableComplete === "function") renderVatTableComplete();
+      }
+    } catch (_) {}
+  }
+
   /**
    * Export prospetto IVA completo
    */
@@ -8202,9 +9058,9 @@ function renderPeriodKpi(results) {
       return;
     }
 
-    const header = "Mese;IVA Credito (Acquisti);IVA Debito (Vendite);Saldo IVA;Riporto da prec.;Posizione prima F24;F24 Versato;Residuo;Chiusa;N. Doc Acquisti;N. Doc Vendite\n";
+    const header = "Mese;IVA Acquisti;IVA Vendite;Saldo mese;Cred/Deb precedente;F24 Versato;Cred/Deb da riportare;Chiusa;N. Doc Acquisti;N. Doc Vendite\n";
     const rows = months.map(m => 
-      `${monthLabelFromKey(m.mese)};${m.ivaAcq.toFixed(2)};${m.ivaVen.toFixed(2)};${m.saldoIva.toFixed(2)};${m.carryIn.toFixed(2)};${m.gross.toFixed(2)};${m.f24Paid.toFixed(2)};${m.running.toFixed(2)};${m.paid ? 'SI' : 'NO'};${m.nAcq};${m.nVen}`
+      `${monthLabelFromKey(m.mese)};${m.ivaAcq.toFixed(2)};${m.ivaVen.toFixed(2)};${m.saldoIva.toFixed(2)};${m.carryIn.toFixed(2)};${m.f24Paid.toFixed(2)};${m.running.toFixed(2)};${m.paid ? 'SI' : 'NO'};${m.nAcq};${m.nVen}`
     ).join("\n");
     
     const csv = header + rows;
@@ -8238,7 +9094,7 @@ function renderPeriodKpi(results) {
         if (headerAcq) headerAcq.style.display = "";
         if (headerComp) headerComp.style.display = "none";
         
-        renderVatLiquidation();
+        renderVatTableComplete();
       }
     });
   }
@@ -8660,5 +9516,183 @@ function renderPeriodKpi(results) {
 
   // Setup stepper navigation (click to scroll)
   setupStepperNavigation();
+
+  } catch (e) {
+    handleFatal(e, "bootstrap");
+  }
+
+  // Error capture global: window.onerror e unhandledrejection
+  if (!window.__GLOBAL_ERROR_HANDLERS) {
+    window.__GLOBAL_ERROR_HANDLERS = true;
+    window.__CONTAIBIL_ERROR_LOG = window.__CONTAIBIL_ERROR_LOG || [];
+    
+    window.addEventListener("error", (evt) => {
+      const err = {
+        t: new Date().toISOString(),
+        type: "window.error",
+        message: evt.message || "Unknown error",
+        file: evt.filename,
+        line: evt.lineno,
+        col: evt.colno,
+        stack: evt.error?.stack || null
+      };
+      window.__CONTAIBIL_ERROR_LOG.push(err);
+      if (window.__CONTAIBIL_ERROR_LOG.length > 50) window.__CONTAIBIL_ERROR_LOG.shift();
+      console.error("[ERROR_LOG]", err);
+    });
+    
+    window.addEventListener("unhandledrejection", (evt) => {
+      const reason = evt.reason || "Unknown rejection";
+      const err = {
+        t: new Date().toISOString(),
+        type: "unhandledrejection",
+        reason: String(reason),
+        stack: reason?.stack || null
+      };
+      window.__CONTAIBIL_ERROR_LOG.push(err);
+      if (window.__CONTAIBIL_ERROR_LOG.length > 50) window.__CONTAIBIL_ERROR_LOG.shift();
+      console.error("[REJECTION_LOG]", err);
+    });
+  }
+
+  // Helper download unico
+  const downloadBlob = (filename, text, mimeType = "application/json") => {
+    try {
+      const blob = new Blob([text], { type: mimeType + ";charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        a.remove();
+      }, 100);
+    } catch (e) {
+      console.error("Download failed:", e);
+      alert("Errore nel download: " + (e?.message || e));
+    }
+  };
+
+  // NOTA: Il pulsante Debug è gestito da btnDebugPack (id="btnDebugPack" in index.html)
+  // Listener già attivo alle righe 589-590
+  // Questo codice è ridondante e commentato per evitare duplicati:
+  /*
+  const btnDownloadDebug = document.getElementById("btnDownloadDebug");
+  if (btnDownloadDebug) {
+    btnDownloadDebug.addEventListener("click", () => {
+      try {
+        const generalDebug = {
+          kind: "contaibil-debug-general",
+          timestamp: new Date().toISOString(),
+          version: "2025-12-21",
+          userAgent: navigator.userAgent,
+          location: location.href,
+          counts: {
+            adeAcquisti: (lastAdeRecords || []).length,
+            adeVendite: (lastAdeSalesRecords || []).length,
+            gestAcquisti: (lastGestRecords || []).length,
+            gestVendite: (lastGestSalesRecords || []).length,
+            resultati: (lastResults || []).length,
+            resultatiVendite: (lastSalesResults || []).length
+          },
+          mapping: {
+            ADE: (typeof getColumnConfig === "function") ? getColumnConfig("ADE") : null,
+            GEST_B: (typeof getColumnConfig === "function") ? getColumnConfig("GEST_B") : null
+          },
+          filtri: {
+            statusFilter: currentFilter,
+            monthFilter: currentMonthFilter,
+            supplierFilter: currentSupplierFilter
+          },
+          errori: window.__CONTAIBIL_ERROR_LOG || [],
+          log: window.__CONTAIBIL_DEBUG_LOGS ? window.__CONTAIBIL_DEBUG_LOGS.slice(-100) : []
+        };
+        const json = JSON.stringify(generalDebug, null, 2);
+        const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        downloadBlob(`contaibil_debug_${ts}.json`, json);
+        if (typeof setStatus === "function") setStatus("✅ Debug scaricato");
+      } catch (e) {
+        console.error("Debug download error:", e);
+      }
+    });
+  }
+  */
+
+  // Bottone "Debug Liquidazione" nella sezione IVA
+  const btnDebugLiquidazione = document.getElementById("btnDebugLiquidazione");
+  if (btnDebugLiquidazione) {
+    btnDebugLiquidazione.addEventListener("click", () => {
+      try {
+        const modeAcqEl = document.getElementById("vatModeAcquisti");
+        const modeCompEl = document.getElementById("vatModeCompleta");
+        const basisEl = document.getElementById("vatDateBasis");
+        const cbPrevEl = document.getElementById("vatIncludePrevYear") || document.getElementById("chkIncludePrevYear");
+        const cbShowClosedEl = document.getElementById("chkShowClosedMonths");
+        const openingBalanceEl = document.getElementById("vatOpeningBalance");
+
+        let months = [];
+        try { months = typeof computeMonthlyVatComplete === "function" ? computeMonthlyVatComplete() : []; } catch (_) { months = []; }
+        const vatState = typeof loadVatState === "function" ? loadVatState() : {};
+
+        const debugLiq = {
+          kind: "contaibil-debug-liquidazione",
+          timestamp: new Date().toISOString(),
+          parametri: {
+            modalita: modeCompEl?.checked ? "COMPLETA" : (modeAcqEl?.checked ? "ACQUISTI" : "UNKNOWN"),
+            dataBasis: basisEl ? basisEl.value : "RICEZIONE",
+            includePrevYear: cbPrevEl ? !!cbPrevEl.checked : (localStorage.getItem("contaibl-vat-include-prev-year") === "true"),
+            showClosedMonths: cbShowClosedEl ? cbShowClosedEl.checked : true,
+            openingBalance: openingBalanceEl ? parseFloat(openingBalanceEl.value) || 0 : 0
+          },
+          months,
+          totali: (() => {
+            let impAcq = 0, ivaAcq = 0, impVen = 0, ivaVen = 0, docAcq = 0, docVen = 0;
+            (months || []).forEach(m => {
+              impAcq += m.impAcq || 0;
+              ivaAcq += m.ivaAcq || 0;
+              impVen += m.impVen || 0;
+              ivaVen += m.ivaVen || 0;
+              docAcq += m.nAcq || 0;
+              docVen += m.nVen || 0;
+            });
+            return { impAcq, ivaAcq, impVen, ivaVen, docAcq, docVen };
+          })(),
+          vatState,
+          state: (function(){ try { return safeJson(window.state || {}); } catch { return {}; } })(),
+          conteggi: {
+            adeAcquisti: (window.state?.lastAdePurchases || lastAdeRecords || []).length,
+            adeVendite: (window.state?.lastAdeSales || lastAdeSalesRecords || []).length
+          },
+          logs: window.__CONTAIBIL_DEBUG_LOGS ? window.__CONTAIBIL_DEBUG_LOGS.slice(-200) : []
+        };
+        const json = JSON.stringify(debugLiq, null, 2);
+        const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        downloadBlob(`contaibil_debug_liquidazione_${ts}.json`, json);
+        if (typeof setStatus === "function") setStatus("✅ Debug liquidazione scaricato");
+      } catch (e) {
+        // Fallback: scarica comunque uno snapshot con errore
+        try {
+          const fallback = {
+            kind: "contaibil-debug-liquidazione",
+            timestamp: new Date().toISOString(),
+            error: { message: e?.message || String(e), stack: e?.stack || null },
+            state: (function(){ try { return safeJson(window.state || {}); } catch { return {}; } })(),
+            counts: {
+              adeAcquisti: (window.state?.lastAdePurchases || []).length,
+              adeVendite: (window.state?.lastAdeSales || []).length
+            },
+            logs: window.__CONTAIBIL_DEBUG_LOGS ? window.__CONTAIBIL_DEBUG_LOGS.slice(-200) : []
+          };
+          const json = JSON.stringify(fallback, null, 2);
+          const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+          downloadBlob(`contaibil_debug_liquidazione_${ts}.json`, json);
+        } catch (e2) {
+          console.error("Liquidazione debug fallback error:", e2);
+        }
+      }
+    });
+  }
 
 });

@@ -20,6 +20,12 @@
     </div>
   </div>
   <div class="app-container">
+    <div id="globalErrorBanner" class="error-banner hidden">
+      <div class="error-banner-content">
+        <span id="globalErrorText">Si è verificato un errore.</span>
+        <button id="btnDismissError" class="error-banner-close" title="Chiudi">×</button>
+      </div>
+    </div>
     <!-- HEADER -->
     <div class="topbar">
       <div class="topbar-main">
@@ -46,9 +52,18 @@
           <button id="btnCompactMode" class="btn-topbar-icon" title="Attiva vista compatta (tipo Excel)">
             <span>🗋</span>
           </button>
+          <button id="btnDebugPack" class="btn-topbar-icon" title="Scarica diagnosi completa (log + liquidazione)">
+            <span>🧰</span>
+            <span class="btn-topbar-label">Scarica Debug (JSON)</span>
+          </button>
           <div class="pill-env">
             <span class="pill-dot"></span>
             <span>Workspace Fatture Acquisto</span>
+          </div>
+          <div id="clientBadge" class="client-badge hidden" title="Cliente rilevato dal file ADE (Partita IVA cliente)">
+            <span class="client-badge-label">Cliente ADE</span>
+            <span id="clientBadgeName"></span>
+            <span id="clientBadgePiva" class="client-badge-piva"></span>
           </div>
         </div>
       </div>
@@ -207,6 +222,9 @@
           </button>
           <button type="button" id="btnLoadProcedures" class="btn btn-tertiary learning-btn">
             📂 Carica procedure
+          </button>
+          <button type="button" id="btnSaveDebugPack" class="btn btn-ghost">
+            📦 Salva Debug (per AI)
           </button>
           <input type="file" id="fileProcedures" accept=".json" style="display:none;" />
         </div>
@@ -978,6 +996,12 @@
               <button id="btnExportVat" class="btn btn-tertiary btn-icon-only" title="Esporta prospetto IVA">
                  📥 Esporta CSV
               </button>
+              <button id="btnDebugVat" class="btn btn-tertiary" title="Scarica debug (liquidazione + log)">
+                🧪 Debug VAT
+              </button>
+              <button id="btnDebugLiquidazione" class="btn btn-tertiary" title="Scarica debug liquidazione con parametri e calcoli">
+                📊 Debug Liquidazione
+              </button>
             </div>
 
             <div class="table-wrapper" style="display:block;">
@@ -994,14 +1018,13 @@
                   <!-- Header per modalità "Completa" (nascosto di default) -->
                   <tr id="vatHeaderCompleta" style="display:none;">
                     <th style="width: 150px;">Periodo (Mese)<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 130px;">IVA Credito (Acq)<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 130px;">IVA Debito (Ven)<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 130px;">Saldo IVA<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 130px;">Riporto da prec.<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 130px;">Posizione prima F24<div class="resizer"></div></th>
-                    <th style="text-align:center; width: 140px;">F24 versato<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 130px;">Residuo<div class="resizer"></div></th>
-                    <th style="text-align:center; width: 100px;">Chiusa<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">IVA acquisti<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">IVA vendite<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 130px;">Saldo mese<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 140px;">Cred./deb. precedente<div class="resizer"></div></th>
+                    <th style="text-align:center; width: 130px;">Versato F24<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 140px;">Cred./deb. da riportare<div class="resizer"></div></th>
+                    <th style="text-align:center; width: 110px;">Stato<div class="resizer"></div></th>
                     <th style="text-align:center; width: 100px;">N. Doc Acq<div class="resizer"></div></th>
                     <th style="text-align:center; width: 100px;">N. Doc Ven<div class="resizer"></div></th>
                   </tr>
