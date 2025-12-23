@@ -1653,6 +1653,7 @@ button[disabled][data-disabled-reason]:hover::after {
   }
   
   /* Edit panel - full screen on mobile */
+  #editPanel,
   .edit-panel {
     width: 100%;
     max-width: 100%;
@@ -1660,7 +1661,7 @@ button[disabled][data-disabled-reason]:hover::after {
   }
   
   .edit-header {
-    padding: 12px;
+    padding: 10px 12px;
   }
   
   #editPanelContent {
@@ -1678,10 +1679,13 @@ button[disabled][data-disabled-reason]:hover::after {
   .edit-actions {
     padding: 12px;
     flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
   }
   
   .edit-actions .btn {
     width: 100%;
+    justify-content: center;
   }
   
   /* Analysis section */

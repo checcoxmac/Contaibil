@@ -72,7 +72,10 @@ window.addEventListener("DOMContentLoaded", () => {
     
     // Lunghezza P.IVA italiana
     PIVA_IT_LENGTH: 11,
-    PIVA_IT_MIN_VALUE: 10000000000   // 10 miliardi (per riconoscere P.IVA come numero)
+    PIVA_IT_MIN_VALUE: 10000000000,  // 10 miliardi (per riconoscere P.IVA come numero)
+    
+    // Soglia per rilevare inversione imponibile/IVA
+    IVA_RATIO_THRESHOLD: 0.6         // Se IVA > 60% imponibile, probabile inversione
   };
 
   // ============================================================
@@ -2821,6 +2824,19 @@ function formatDateForUI(dateObj) {
     // 🔍 DEBUG: Valori dopo parsing
     if (num === "2528012466" || String(num).includes("2528012466")) {
       console.log(`   ✅ Dopo parsing: imp=${imp}, iva=${iva}, tot=${tot}`);
+    }
+    
+    // 🔧 FIX: Check for inverted imponibile/imposta values
+    // If IVA is more than threshold % of imponibile, they're likely swapped
+    if (imp > 0 && iva > 0) {
+      const ratio = iva / imp;
+      if (ratio > MATCH_CONFIG.IVA_RATIO_THRESHOLD) {
+        console.warn(
+          `Imponibile/IVA mismatch detected (imp=${imp}, iva=${iva}). Swapping values.`
+        );
+        [imp, iva] = [iva, imp];
+        tot = +(imp + iva).toFixed(2);
+      }
     }
     
     // ✅ VALIDAZIONE IMPORTI
