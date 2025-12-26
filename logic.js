@@ -19,6 +19,16 @@ window.addEventListener("DOMContentLoaded", () => {
     if (errorBanner) errorBanner.classList.add("hidden");
   };
   if (btnDismissError) btnDismissError.addEventListener("click", hideErrorBanner);
+  const escapeHtml = (value) => {
+    if (value === null || value === undefined) return "";
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  };
+
 
   const pushDebugLog = (level, payload) => {
     try {
@@ -2241,7 +2251,7 @@ function formatDateForUI(dateObj) {
             const helper = document.getElementById("gestMapHelper");
             if (helper) {
               const prefix = reuseValidation.severity === "WARN" ? "⚠️" : "✅";
-              const details = reuseValidation.reasons?.length ? `<br>${reuseValidation.reasons.join("<br>")}` : "";
+              const details = reuseValidation.reasons?.length ? `<br>${reuseValidation.reasons.map(escapeHtml).join("<br>")}` : "";
               helper.innerHTML = `${prefix} <strong>Riutilizzato mapping File B per File C</strong>${details}`;
             }
             return cfgB;
@@ -2267,7 +2277,7 @@ function formatDateForUI(dateObj) {
         console.warn(`Mapping ${mappingKey} con warning:`, validation.reasons);
         const helper = document.getElementById("gestMapHelper");
         if (helper) {
-          helper.innerHTML = `⚠️ <strong>Warning mapping salvato:</strong><br>${validation.reasons.join("<br>")}`;
+          helper.innerHTML = `⚠️ <strong>Warning mapping salvato:</strong><br>${validation.reasons.map(escapeHtml).join("<br>")}`;
         }
         markMappingConfirmed(mappingKey, headers);
         return cfg;
@@ -2275,7 +2285,7 @@ function formatDateForUI(dateObj) {
         // BLOCK: cfg esistente non valido
         const helper = document.getElementById("gestMapHelper");
         if (helper) {
-          helper.innerHTML = `🚫 <strong>Mapping salvato non valido:</strong><br>${validation.reasons.join("<br>")}`;
+          helper.innerHTML = `🚫 <strong>Mapping salvato non valido:</strong><br>${validation.reasons.map(escapeHtml).join("<br>")}`;
         }
         const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
         if (userCfg && (userCfg.num || userCfg.data)) {
@@ -2303,7 +2313,7 @@ function formatDateForUI(dateObj) {
           helper.innerHTML = `✅ <strong>Mapping rilevato automaticamente</strong>`;
         } else {
           const allReasons = [...(inferred.reasons || []), ...(validation.reasons || [])].filter(Boolean);
-          const details = allReasons.length ? `<br>${allReasons.join("<br>")}` : "";
+          const details = allReasons.length ? `<br>${allReasons.map(escapeHtml).join("<br>")}` : "";
           helper.innerHTML = `⚠️ <strong>Mapping rilevato con avvisi</strong>${details}`;
         }
       }
@@ -2314,7 +2324,7 @@ function formatDateForUI(dateObj) {
     const helper = document.getElementById("gestMapHelper");
     if (helper) {
       const allReasons = [...(inferred.reasons || []), ...(validation.reasons || [])].filter(Boolean);
-      helper.innerHTML = `🚫 <strong>Mapping obbligatorio:</strong><br>${allReasons.join("<br>")}<br><br>Seleziona manualmente le colonne corrette.`;
+      helper.innerHTML = `🚫 <strong>Mapping obbligatorio:</strong><br>${allReasons.map(escapeHtml).join("<br>")}<br><br>Seleziona manualmente le colonne corrette.`;
     }
 
     const userCfg = await openGestMappingModal(headers, fileDescription, mappingKey);
@@ -6686,7 +6696,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     // Mostra il modale con i motivi della validazione fallita
     const helper = document.getElementById("gestMapHelper");
     if (helper) {
-      helper.innerHTML = `⚠️ <strong>Mapping richiede verifica:</strong><br>${v.reasons.join(" | ")}`;
+      helper.innerHTML = `⚠️ <strong>Mapping richiede verifica:</strong><br>${v.reasons.map(escapeHtml).join(" | ")}`;
       helper.classList.add("error");
     }
     
@@ -8900,9 +8910,9 @@ function renderPeriodKpi(results) {
       const tdP = document.createElement("td");
       const baseLabel = g.label || monthLabelFromKey(key);
       const anomBadge = g.anom
-        ? `<button type="button" class="vat-anom-pill" data-month="${key}" title="Vedi anomalie segni mese">⚠ ${g.anom}</button>`
+        ? `<button type="button" class="vat-anom-pill" data-month="${escapeHtml(key)}" title="Vedi anomalie segni mese">⚠ ${escapeHtml(g.anom)}</button>`
         : "";
-      tdP.innerHTML = `${baseLabel} ${anomBadge}`;
+      tdP.innerHTML = `${escapeHtml(baseLabel)} ${anomBadge}`;
 
       const tdN = document.createElement("td");
       tdN.textContent = String(g.count || 0);
@@ -9365,11 +9375,11 @@ function renderPeriodKpi(results) {
     } else {
       const rows = list.map(a => `
         <tr>
-          <td class="mono">${(a.num || "")}</td>
-          <td>${(a.den || "")}</td>
-          <td class="mono">${(a.piva || "")}</td>
-          <td class="mono">${(a.data || "")}</td>
-          <td class="mono">${(a.tipoDoc || "")}</td>
+          <td class="mono">${escapeHtml(a.num || "")}</td>
+          <td>${escapeHtml(a.den || "")}</td>
+          <td class="mono">${escapeHtml(a.piva || "")}</td>
+          <td class="mono">${escapeHtml(a.data || "")}</td>
+          <td class="mono">${escapeHtml(a.tipoDoc || "")}</td>
           <td class="mono">${formatNumberITDisplay(a.imp)}</td>
           <td class="mono">${formatNumberITDisplay(a.iva)}</td>
           <td class="mono">${formatNumberITDisplay(a.tot)}</td>
