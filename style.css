@@ -336,34 +336,46 @@ body.modal-open {
 }
 
 .pill-env {
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--sys-separator);
-  background: var(--sys-bg-content);
+  border: 1px solid rgba(255,255,255,0.2);
+  background: linear-gradient(135deg, rgba(15,118,110,0.18), rgba(59,130,246,0.16));
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  color: var(--sys-text-primary);
+  backdrop-filter: blur(10px);
 }
 
 .client-badge {
-  padding: 4px 10px;
+  padding: 7px 14px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--sys-separator);
-  background: var(--sys-bg-content);
+  border: 1px solid rgba(255,255,255,0.2);
+  background: linear-gradient(135deg, rgba(59,130,246,0.18), rgba(67,56,202,0.18));
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.25);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
+  gap: 10px;
+  font-size: 0.8rem;
   color: var(--sys-text-primary);
+  backdrop-filter: blur(12px);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.client-badge .client-badge-label {
-  font-weight: 600;
-  color: var(--sys-text-secondary);
+.client-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.3);
 }
 
+.client-badge .client-badge-label,
 .client-badge .client-badge-piva {
+  display: none;
+}
+
+#clientBadgeName {
   font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .pill-dot {
@@ -2260,26 +2272,30 @@ body.wide-mode .table-container {
 
 /* Bottone wide-mode nel topbar */
 .btn-topbar-icon {
-  background: transparent;
-  border: none;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  border: 1px solid rgba(255,255,255,0.28);
   color: var(--sys-text-primary);
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   cursor: pointer;
   padding: 8px 12px;
-  border-radius: 6px;
-  transition: background-color 0.2s ease;
-  display: flex;
+  border-radius: 12px;
+  transition: background-color 0.2s ease, transform 0.12s ease, box-shadow 0.2s ease;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.35);
 }
 
 .btn-topbar-icon:hover {
-  background-color: var(--sys-bg-content-alt);
+  background-color: rgba(255,255,255,0.18);
+  transform: translateY(-1px);
 }
 
 .btn-topbar-icon.active {
   color: var(--sys-tint-blue);
-  background-color: rgba(0, 122, 255, 0.1);
+  background: linear-gradient(135deg, rgba(59,130,246,0.16), rgba(37,99,235,0.26));
+  box-shadow: 0 12px 24px rgba(37,99,235,0.18);
 }
 
 /* --- LOADING OVERLAY --- */
@@ -2660,7 +2676,9 @@ tbody tr:not([class*="status-"]):hover td {
 #section-vat .table-wrapper {
     min-height: 500px; /* Altezza minima garantita */
     max-height: 70vh;  /* Massima altezza (scroll verticale) */
-    overflow-y: auto;
+  overflow-y: auto;
+  padding-top: 6px; /* evita che l'intestazione copra la prima riga */
+  scroll-padding-top: 64px;
 }
 
 /* --- MANIGLIA DI RIDIMENSIONAMENTO (RESIZER) --- */
@@ -2859,6 +2877,23 @@ tr.vat-closed {
   box-shadow: 0 6px 12px rgba(0,0,0,0.25);
 }
 
+/* ✅ FIX VAT: in modalità "completa" l'header visibile è la 2ª riga del THEAD.
+   La regola sticky globale la spinge a top:34px => effetto sovrapposizione con le righe dei mesi.
+   Qui forziamo top:0 e sfondo opaco SOLO per la tabella IVA. */
+#section-vat #vatTable thead tr#vatHeaderAcquisti th,
+#section-vat #vatTable thead tr#vatHeaderCompleta th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 120 !important;
+  background: var(--sys-bg-content) !important;  /* opaco: niente "trasparenza" sui mesi */
+  border-bottom: 1px solid var(--sys-separator);
+  background-clip: padding-box;
+}
+
+#section-vat #vatTable thead th {
+  box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+}
+
 /* ===========================
    Tabella più alta: usa l'altezza disponibile
    =========================== */
@@ -2877,6 +2912,137 @@ tr.vat-closed {
   flex: 1;
   min-height: 420px;
   max-height: calc(100vh - 240px);
+}
+
+/* Badge cliccabile */
+.vat-anom-btn{
+  cursor: pointer;
+  appearance: none;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+/* Modal anomalie */
+.vat-modal{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;
+  background: rgba(0,0,0,0.62);
+  padding: 24px;
+}
+
+.vat-modal__panel{
+  max-width: 980px;
+  margin: 0 auto;
+  background: rgba(20,20,20,0.98);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+}
+
+.vat-modal__head{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.vat-modal__title{
+  font-weight: 700;
+}
+
+.vat-modal__close{
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.vat-modal__body{
+  padding: 14px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.vat-modal__body table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.vat-modal__body th,
+.vat-modal__body td{
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  vertical-align: top;
+}
+
+.vat-modal__body th{
+  position: sticky;
+  top: 0;
+  background: rgba(20,20,20,0.98);
+  z-index: 2;
+}
+
+.vat-anomaly-banner{
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.10);
+  color: rgba(255,255,255,0.92);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.badge-warn{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Badge anomalie IVA (segni discordanti) - Acquisti */
+.vat-anom-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(220, 38, 38, 0.5);
+  background: rgba(220, 38, 38, 0.08);
+  color: rgba(220, 38, 38, 0.9);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.vat-anom-pill:hover {
+  border-color: rgba(220, 38, 38, 0.8);
+  background: rgba(220, 38, 38, 0.15);
+  color: rgba(220, 38, 38, 1);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.15);
+  transform: translateY(-1px);
+}
+
+.vat-anom-pill:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(220, 38, 38, 0.1);
 }
 
 :root {
@@ -3182,13 +3348,16 @@ body {
 }
 
 .pill-env {
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--sys-separator);
-  background: var(--sys-bg-content);
+  border: 1px solid rgba(255,255,255,0.2);
+  background: linear-gradient(135deg, rgba(15,118,110,0.18), rgba(59,130,246,0.16));
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  color: var(--sys-text-primary);
+  backdrop-filter: blur(10px);
 }
 
 .pill-dot {
@@ -5070,26 +5239,30 @@ body.wide-mode .table-container {
 
 /* Bottone wide-mode nel topbar */
 .btn-topbar-icon {
-  background: transparent;
-  border: none;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  border: 1px solid rgba(255,255,255,0.28);
   color: var(--sys-text-primary);
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   cursor: pointer;
   padding: 8px 12px;
-  border-radius: 6px;
-  transition: background-color 0.2s ease;
-  display: flex;
+  border-radius: 12px;
+  transition: background-color 0.2s ease, transform 0.12s ease, box-shadow 0.2s ease;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.35);
 }
 
 .btn-topbar-icon:hover {
-  background-color: var(--sys-bg-content-alt);
+  background-color: rgba(255,255,255,0.18);
+  transform: translateY(-1px);
 }
 
 .btn-topbar-icon.active {
   color: var(--sys-tint-blue);
-  background-color: rgba(0, 122, 255, 0.1);
+  background: linear-gradient(135deg, rgba(59,130,246,0.16), rgba(37,99,235,0.26));
+  box-shadow: 0 12px 24px rgba(37,99,235,0.18);
 }
 
 /* --- LOADING OVERLAY --- */
@@ -5375,6 +5548,7 @@ table.excel-view thead th {
   flex: 1 1 auto;
   min-height: 420px;
   height: calc(100vh - 260px); /* Regolabile per allungare la tabella */
+  max-height: none;
 }
 
 /* Sezioni principali: colonna e altezza viewport */

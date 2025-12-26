@@ -786,6 +786,9 @@
             </div>
           </div>
 
+          <!-- ⚠️ Warning anomalie segni (ADE) -->
+          <div id="vatAnomalyBanner" class="vat-anomaly-banner" style="display:none;"></div>
+
           <div class="analysis-table-card">
             <div class="analysis-table-header">
               <div>
@@ -862,7 +865,6 @@
             </div>
           </div>
         </div>
-      </div>
 
       <!-- SEZIONE 4: LIQUIDAZIONE IVA -->
       <div class="section" id="section-vat">
@@ -1010,10 +1012,10 @@
                   <!-- Header per modalità "Solo Acquisti" (default) -->
                   <tr id="vatHeaderAcquisti">
                     <th style="width: 150px;">Periodo (Mese)<div class="resizer"></div></th>
-                    <th style="width: 100px;">N. Fatture<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 150px;">Imponibile<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 150px;">IVA<div class="resizer"></div></th>
-                    <th style="text-align:right; width: 150px;">Totale Fattura<div class="resizer"></div></th>
+                    <th style="width: 110px;">N. Doc ADE<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 160px;">Imponibile (acquisti)<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 150px;">IVA a credito<div class="resizer"></div></th>
+                    <th style="text-align:right; width: 160px;">Totale documenti<div class="resizer"></div></th>
                   </tr>
                   <!-- Header per modalità "Completa" (nascosto di default) -->
                   <tr id="vatHeaderCompleta" style="display:none;">
@@ -1034,12 +1036,13 @@
               </table>
             </div>
             
-            <div class="analysis-footer-note">
+          <div class="analysis-footer-note">
               Attenzione: I dati si basano sulla data documento presente nel file ADE, non sulla data di competenza/detrazione effettiva.
             </div>
           </div>
         </div>
       </div>
+    </div>
 
         <!-- Popup mapping colonne GESTIONALE -->
 <div id="gestMapBackdrop" class="modal-backdrop hidden">
@@ -1245,6 +1248,17 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- Script principale -->
   <script src="logic.js"></script>
+
+  <!-- Modal anomalie segni IVA -->
+  <div id="vatAnomModal" class="vat-modal" style="display:none;">
+    <div class="vat-modal__panel">
+      <div class="vat-modal__head">
+        <div id="vatAnomModalTitle" class="vat-modal__title">Anomalie segni</div>
+        <button id="vatAnomModalClose" class="vat-modal__close" type="button">✕</button>
+      </div>
+      <div id="vatAnomModalBody" class="vat-modal__body"></div>
+    </div>
+  </div>
 
 </body>
 </html>

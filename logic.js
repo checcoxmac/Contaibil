@@ -742,8 +742,16 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     badge.classList.remove("hidden");
-    if (nameEl) nameEl.textContent = currentClient.name || "Cliente ADE";
-    if (pivaEl) pivaEl.textContent = currentClient.piva ? `P.IVA ${currentClient.piva}` : "";
+    const displayName = currentClient.name || "Cliente";
+    if (nameEl) nameEl.textContent = displayName;
+    if (pivaEl) {
+      pivaEl.textContent = ""; // visibile solo tramite tooltip
+      pivaEl.setAttribute("aria-hidden", "true");
+    }
+
+    badge.title = currentClient.piva
+      ? `${displayName} · P.IVA ${currentClient.piva}`
+      : displayName;
   }
 
   function setCurrentClient(piva, name) {
@@ -1561,6 +1569,30 @@ function formatDateForUI(dateObj) {
   //   "-18,09"  → -18.09
   //   "1.234,50" → 1234.5
 
+  function tryParseNumberLoose(val) {
+    if (val == null) return null;
+    let s = String(val)
+      .replace(/\u00A0/g, " ")
+      .replace(/['"]/g, "")
+      .trim();
+
+    if (!s || s === "-") return null;
+
+    // togli valuta e spazi
+    s = s.replace(/EUR/gi, "").replace(/€/g, "").replace(/\s+/g, "");
+
+    // se la valuta o simboli stanno davanti (es. "€1.234,56") li elimino
+    s = s.replace(/^[^\d\-]+/, "");
+
+    let num;
+    if (/^-?\d+\.\d{2}$/.test(s)) num = parseFloat(s);
+    else if (s.includes(",") && s.includes(".")) num = parseFloat(s.replace(/\./g, "").replace(",", "."));
+    else if (s.includes(",")) num = parseFloat(s.replace(",", "."));
+    else num = parseFloat(s);
+
+    return Number.isFinite(num) ? num : null;
+  }
+
   // ============================================================
   // 🔢 UTILITIES P.IVA E NUMERI FATTURA
   // ============================================================
@@ -2000,13 +2032,18 @@ function formatDateForUI(dateObj) {
       }
 
       // Imponibile
-      if (!cfg.imp && (n.includes("imponibile") || n.includes("importo") || n.includes("netto") || (n.includes("imp") && !n.includes("imposta")))) {
+      if (!cfg.imp && (
+        n.includes("imponibile") ||
+        n.includes("importo") ||
+        n.includes("netto") ||
+        (n.includes("imp") && !n.includes("imposta") && !n.includes("impos"))
+      )) {
         cfg.imp = h;
         score += 1;
       }
 
       // IVA
-      if (!cfg.iva && (n.includes("iva") || n.includes("imposta"))) {
+      if (!cfg.iva && (n.includes("iva") || n.includes("imposta") || n.includes("impos"))) {
         // Evita colonne che sembrano aliquote
         if (!n.includes("aliquota") && !n.includes("perc") && !n.includes("%")) {
           cfg.iva = h;
@@ -2085,9 +2122,10 @@ function formatDateForUI(dateObj) {
     const idxIva = cfg.iva ? headers.indexOf(cfg.iva) : -1;
     const idxTot = cfg.tot ? headers.indexOf(cfg.tot) : -1;
 
-    let nonNumericTot = 0;
-    let nonNumericImp = 0;
-    let nonNumericIva = 0;
+    // Conta solo celle valorizzate (non vuote) e non numeriche
+    let seenTot = 0, badTot = 0;
+    let seenImp = 0, badImp = 0;
+    let seenIva = 0, badIva = 0;
     let totLessThanImp = 0;
     let invalidDates = 0;
     let ivaSuspectAliquota = 0;
@@ -2095,25 +2133,37 @@ function formatDateForUI(dateObj) {
     for (const row of sample) {
       // Check totale numerico
       if (idxTot >= 0) {
-        const val = parseFloat(String(row[idxTot] || "").replace(",", "."));
-        if (isNaN(val)) nonNumericTot++;
+        const raw = String(row[idxTot] ?? "").trim();
+        if (raw !== "") {
+          seenTot++;
+          const val = tryParseNumberLoose(raw);
+          if (val === null) badTot++;
+        }
       }
 
       // Check imponibile numerico
       if (idxImp >= 0) {
-        const val = parseFloat(String(row[idxImp] || "").replace(",", "."));
-        if (isNaN(val)) nonNumericImp++;
+        const raw = String(row[idxImp] ?? "").trim();
+        if (raw !== "") {
+          seenImp++;
+          const val = tryParseNumberLoose(raw);
+          if (val === null) badImp++;
+        }
       }
 
       // Check IVA numerico e valori sospetti
       if (idxIva >= 0) {
-        const val = parseFloat(String(row[idxIva] || "").replace(",", "."));
-        if (isNaN(val)) {
-          nonNumericIva++;
-        } else {
-          // Valori tipici di aliquota (4, 5, 10, 22) → sospetto
-          if (val === 4 || val === 5 || val === 10 || val === 22) {
-            ivaSuspectAliquota++;
+        const raw = String(row[idxIva] ?? "").trim();
+        if (raw !== "") {
+          seenIva++;
+          const val = tryParseNumberLoose(raw);
+          if (val === null) {
+            badIva++;
+          } else {
+            // Valori tipici di aliquota (4, 5, 10, 22) → sospetto
+            if (val === 4 || val === 5 || val === 10 || val === 22) {
+              ivaSuspectAliquota++;
+            }
           }
         }
       }
@@ -2138,17 +2188,17 @@ function formatDateForUI(dateObj) {
 
     const sampleCount = sample.length;
 
-    // Soglie di warning
-    if (nonNumericTot > sampleCount * 0.3) {
-      reasons.push(`⚠️ ${Math.round(nonNumericTot / sampleCount * 100)}% dei Totali non sono numerici`);
+    // Soglie di warning basate solo su celle valorizzate
+    if (seenTot > 0 && (badTot / seenTot) > 0.95) {
+      reasons.push("⚠️ molti Totali non sono numerici");
       severity = "WARN";
     }
-    if (nonNumericImp > sampleCount * 0.3) {
-      reasons.push(`⚠️ ${Math.round(nonNumericImp / sampleCount * 100)}% degli Imponibili non sono numerici`);
+    if (seenImp > 0 && (badImp / seenImp) > 0.95) {
+      reasons.push("⚠️ molti Imponibili non sono numerici");
       severity = "WARN";
     }
-    if (nonNumericIva > sampleCount * 0.3) {
-      reasons.push(`⚠️ ${Math.round(nonNumericIva / sampleCount * 100)}% delle IVA non sono numeriche`);
+    if (seenIva > 0 && (badIva / seenIva) > 0.95) {
+      reasons.push("⚠️ molte IVA non sono numeriche");
       severity = "WARN";
     }
     if (ivaSuspectAliquota > sampleCount * 0.5) {
@@ -8270,6 +8320,26 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       if (targetSection) {
         targetSection.classList.add("active");
       }
+
+      // ✅ SCROLL ROBUSTO: forza scroll a inizio pagina (evita tab "vuoti")
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+
+      // Scroll animato della sezione target con requestAnimationFrame
+      requestAnimationFrame(() => {
+        targetSection?.scrollIntoView({ block: "start" });
+      });
+
+      // Se apri section-vat, resetta anche gli scroll interni
+      if (targetId === "section-vat") {
+        requestAnimationFrame(() => {
+          const tableWrapper = document.querySelector("#section-vat .table-wrapper");
+          const analysisWrapper = document.querySelector("#section-vat .analysis-wrapper");
+          if (tableWrapper) tableWrapper.scrollTop = 0;
+          if (analysisWrapper) analysisWrapper.scrollTop = 0;
+        });
+      }
     });
   });
 
@@ -8618,14 +8688,61 @@ function renderPeriodKpi(results) {
     return false;
   }
 
+  // ==============================
+  // 🔎 Anomalie segni (ADE) helper
+  // ==============================
+  let lastVatSignAnomalies = []; // ultimo set anomalie (per banner/UI)
+
+  function isVatSignAnomaly(rec, imp, iva, tot) {
+    const eps = 0.02;
+
+    const nImp = Number(imp);
+    const nIva = Number(iva);
+    const nTot = Number(tot);
+
+    if (!Number.isFinite(nImp) || !Number.isFinite(nIva) || !Number.isFinite(nTot)) return false;
+
+    const sum = nImp + nIva;
+
+    // Caso classico: imp e iva con segni diversi (es. imp<0 e iva>0)
+    const signMismatch = (nImp !== 0 && nIva !== 0 && Math.sign(nImp) !== Math.sign(nIva));
+
+    // Totale incoerente rispetto a imp+iva
+    const totMismatch = Math.abs(sum - nTot) > eps;
+
+    // Totale con segno diverso dal “sum” (quando entrambi non sono 0)
+    const totSignMismatch = (sum !== 0 && nTot !== 0 && Math.sign(sum) !== Math.sign(nTot));
+
+    return signMismatch || totMismatch || totSignMismatch;
+  }
+
+  function updateVatAnomalyBanner(count, scopeLabel) {
+    const el = document.getElementById("vatAnomalyBanner");
+    if (!el) return;
+
+    if (!count) {
+      el.style.display = "none";
+      el.textContent = "";
+      return;
+    }
+
+    el.style.display = "block";
+    el.textContent = `⚠️ Anomalie segni rilevate (${scopeLabel}): ${count}. ` +
+                     `I totali restano quelli ADE (non correggo automaticamente i valori).`;
+  }
+
   function buildVatGroups(records, basis, includePrevYear) {
     const targetYear = detectVatTargetYear(records, basis);
     const groups = {};
+    const anomalies = [];
+    const zeroIvaByMonth = {}; // Conteggio info: record con IVA quasi nulla
+    const eps = 0.005; // Tolleranza: 0,5 centesimi
     let grandImp = 0;
     let grandIva = 0;
     let grandTot = 0;
     let excludedNoDate = 0;
     let excludedOutOfYear = 0;
+    let zeroIvaCount = 0; // Totale globale
 
     (records || []).forEach(r => {
       const inScope = shouldIncludeInVatYear(r, targetYear, includePrevYear, basis);
@@ -8635,11 +8752,41 @@ function renderPeriodKpi(results) {
       if (!iso || iso.length < 7) { excludedNoDate++; return; }
 
       const key = iso.slice(0, 7); // YYYY-MM
-      if (!groups[key]) groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, label: monthLabelFromKey(key) };
+      if (!groups[key]) {
+        groups[key] = { count: 0, imp: 0, iva: 0, tot: 0, label: monthLabelFromKey(key), anom: 0, zeroIva: 0 };
+      }
+      if (!zeroIvaByMonth[key]) zeroIvaByMonth[key] = 0;
 
       const imp = r.imp || 0;
       const iva = r.iva || 0;
       const tot = r.tot || 0;
+
+      // Rileva anomalie segni: entrambi importi > eps E segni discordanti
+      // Esclude: record con IVA = 0 (fatture senza IVA, operazioni esenti, etc.)
+      const isoDate = getVatIsoFromRecord(r, basis) || r.dataIso || r.data || null;
+      const absImp = Math.abs(imp || 0);
+      const absIva = Math.abs(iva || 0);
+      const isSignAnomaly = absImp > eps && absIva > eps && Math.sign(imp) !== Math.sign(iva);
+      
+      if (isSignAnomaly) {
+        groups[key].anom++;
+        anomalies.push({
+          mese: key,
+          num: r.num || "",
+          den: r.den || "",
+          piva: r.piva || "",
+          data: isoDate,
+          tipoDoc: r.tipoDoc || "",
+          imp, iva, tot
+        });
+      }
+
+      // Conta record con IVA quasi nulla
+      if (absIva <= eps) {
+        groups[key].zeroIva++;
+        zeroIvaCount++;
+        zeroIvaByMonth[key]++;
+      }
 
       groups[key].count++;
       groups[key].imp += imp;
@@ -8653,7 +8800,31 @@ function renderPeriodKpi(results) {
 
     const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
 
-    return { groups, keys, grandImp, grandIva, grandTot, targetYear, excludedNoDate, excludedOutOfYear };
+    return { 
+      groups, 
+      keys, 
+      grandImp, 
+      grandIva, 
+      grandTot, 
+      targetYear, 
+      excludedNoDate, 
+      excludedOutOfYear, 
+      anomalies,
+      zeroIvaByMonth,  // Info: record con IVA quasi nulla per mese
+      zeroIvaCount     // Total globale
+    };
+  }
+
+
+  // Helper: renderizza la modalità IVA corrente (acquisti vs completa)
+  function renderVatCurrentMode() {
+    const modeCompletaEl = document.getElementById("vatModeCompleta");
+    const isCompleta = !!(modeCompletaEl && modeCompletaEl.checked);
+    if (isCompleta) {
+      renderVatTableComplete();
+    } else {
+      renderVatLiquidation();
+    }
   }
 
 
@@ -8686,7 +8857,7 @@ function renderPeriodKpi(results) {
       selBasis.value = basis;
       selBasis.onchange = () => {
         localStorage.setItem(lsBasisKey, selBasis.value);
-        renderVatLiquidation();
+        renderVatCurrentMode();
       };
       basis = String(selBasis.value || basis).toUpperCase();
     }
@@ -8697,12 +8868,15 @@ function renderPeriodKpi(results) {
       cb.checked = includePrevYear;
       cb.onchange = () => {
         localStorage.setItem(lsPrevKey, cb.checked ? "true" : "false");
-        renderVatLiquidation();
+        renderVatCurrentMode();
       };
       includePrevYear = cb.checked;
     }
 
     const vat = buildVatGroups(lastAdeRecords, basis, includePrevYear);
+    // Aggiorna banner anomalie
+    lastVatSignAnomalies = vat.anomalies || [];
+    updateVatAnomalyBanner(lastVatSignAnomalies.length, "Acquisti");
     diagMark("VAT.compute.done", { months: vat.keys ? vat.keys.length : 0 });
 
     // KPI (stesso perimetro della tabella)
@@ -8720,9 +8894,15 @@ function renderPeriodKpi(results) {
     vat.keys.forEach(key => {
       const g = vat.groups[key];
       const tr = document.createElement("tr");
+      tr.dataset.month = key;     // es: "2025-02"
+      tr.style.cursor = "pointer";
 
       const tdP = document.createElement("td");
-      tdP.textContent = g.label || monthLabelFromKey(key);
+      const baseLabel = g.label || monthLabelFromKey(key);
+      const anomBadge = g.anom
+        ? `<button type="button" class="vat-anom-pill" data-month="${key}" title="Vedi anomalie segni mese">⚠ ${g.anom}</button>`
+        : "";
+      tdP.innerHTML = `${baseLabel} ${anomBadge}`;
 
       const tdN = document.createElement("td");
       tdN.textContent = String(g.count || 0);
@@ -8771,6 +8951,7 @@ function renderPeriodKpi(results) {
     if (cbPrev) includePrevYear = cbPrev.checked;
 
     const monthlyMap = new Map();
+    const anomalies = [];
 
     const hasPurchases = Array.isArray(lastAdeRecords) && lastAdeRecords.length > 0;
     const targetYear = hasPurchases
@@ -8791,7 +8972,8 @@ function renderPeriodKpi(results) {
         monthlyMap.set(key, {
           mese: key,
           impAcq: 0, ivaAcq: 0, totAcq: 0, nAcq: 0,
-          impVen: 0, ivaVen: 0, totVen: 0, nVen: 0
+          impVen: 0, ivaVen: 0, totVen: 0, nVen: 0,
+          anomAcq: 0, anomVen: 0
         });
       }
       
@@ -8800,6 +8982,23 @@ function renderPeriodKpi(results) {
       m.ivaAcq += parseFloat(rec.iva) || 0;
       m.totAcq += parseFloat(rec.tot) || 0;
       m.nAcq++;
+
+      // Anomalie lato acquisti (usa data iso della basis)
+      if (isVatSignAnomaly(rec, rec.imp, rec.iva, rec.tot)) {
+        m.anomAcq = (m.anomAcq || 0) + 1;
+        anomalies.push({
+          scope: "ACQ",
+          mese: key,
+          data: iso,  // Data coerente con basis e monthKey
+          num: rec.num || "",
+          den: rec.den || "",
+          piva: rec.piva || "",
+          imp: rec.imp,
+          iva: rec.iva,
+          tot: rec.tot,
+          tipoDoc: rec.tipoDoc || ""
+        });
+      }
     });
 
     // 2. VENDITE (IVA a DEBITO)
@@ -8816,7 +9015,8 @@ function renderPeriodKpi(results) {
         monthlyMap.set(key, {
           mese: key,
           impAcq: 0, ivaAcq: 0, totAcq: 0, nAcq: 0,
-          impVen: 0, ivaVen: 0, totVen: 0, nVen: 0
+          impVen: 0, ivaVen: 0, totVen: 0, nVen: 0,
+          anomAcq: 0, anomVen: 0
         });
       }
       
@@ -8825,13 +9025,31 @@ function renderPeriodKpi(results) {
       m.ivaVen += parseFloat(rec.iva) || 0;
       m.totVen += parseFloat(rec.tot) || 0;
       m.nVen++;
+
+      // Anomalie lato vendite (usa data iso della basis)
+      if (isVatSignAnomaly(rec, rec.imp, rec.iva, rec.tot)) {
+        m.anomVen = (m.anomVen || 0) + 1;
+        anomalies.push({
+          scope: "VEN",
+          mese: key,
+          data: iso,  // Data coerente con basis (EMISSIONE per vendite) e monthKey
+          num: rec.num || "",
+          den: rec.den || "",
+          piva: rec.piva || "",
+          imp: rec.imp,
+          iva: rec.iva,
+          tot: rec.tot,
+          tipoDoc: rec.tipoDoc || ""
+        });
+      }
     });
 
     // 3. CALCOLA SALDO BASE
     const months = Array.from(monthlyMap.values()).map(m => {
       return {
         ...m,
-        saldoIva: m.ivaVen - m.ivaAcq  // DEBITO - CREDITO
+        saldoIva: m.ivaVen - m.ivaAcq,  // DEBITO - CREDITO
+        anomTot: (m.anomAcq || 0) + (m.anomVen || 0)
       };
     });
 
@@ -8879,6 +9097,8 @@ function renderPeriodKpi(results) {
       carryIn = running;
     });
 
+    // Salva global anomalies per UI banner
+    lastVatSignAnomalies = anomalies;
     return months;
   }
 
@@ -8927,6 +9147,8 @@ function renderPeriodKpi(results) {
     if (!tbody) return;
 
     const months = computeMonthlyVatComplete();
+    // Banner anomalie su modalità completa
+    updateVatAnomalyBanner((lastVatSignAnomalies || []).length, "Acquisti + Vendite");
 
     tbody.innerHTML = "";
 
@@ -8965,17 +9187,25 @@ function renderPeriodKpi(results) {
       // Badge chiusa
       const badgeClosed = m.paid ? '<span class="badge-closed">✅ CHIUSA</span>' : '';
 
+      // Mostra un suggerimento esplicito quando il riporto precedente è a credito
+      const carryCellHtml = (m.carryIn < 0)
+        ? `<span title="Credito IVA mese precedente" style="font-style:italic; color:#16a34a;">${formatNumberITDisplay(m.carryIn)}</span>`
+        : `${formatNumberITDisplay(m.carryIn)}`;
+
       // Input F24
       const inputDisabled = m.gross <= 0 ? 'disabled' : '';
       const overpayClass = m.f24Overpay ? 'vat-f24-overpay' : '';
       const f24InputHtml = `<input type="number" class="vat-f24-input ${overpayClass}" data-month="${m.mese}" value="${m.f24Paid.toFixed(2)}" step="0.01" min="0" ${inputDisabled} />`;
 
       tr.innerHTML = `
-        <td>${monthLabelFromKey(m.mese)}</td>
+        <td>
+          ${monthLabelFromKey(m.mese)}
+          ${m.anomTot ? `<span class="badge-warn">⚠ ${m.anomTot}</span>` : ""}
+        </td>
         <td style="text-align:right" class="num">${formatNumberITDisplay(m.ivaAcq)}</td>
         <td style="text-align:right" class="num">${formatNumberITDisplay(m.ivaVen)}</td>
         <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.saldoIva)}</td>
-        <td style="text-align:right" class="num">${formatNumberITDisplay(m.carryIn)}</td>
+        <td style="text-align:right" class="num">${carryCellHtml}</td>
         <td style="text-align:center">${f24InputHtml}</td>
         <td style="text-align:right; font-weight:700;" class="num">${formatNumberITDisplay(m.running)}</td>
         <td style="text-align:center">${badgeClosed}</td>
@@ -9081,53 +9311,142 @@ function renderPeriodKpi(results) {
   const vatKpiContainer = document.getElementById("vatKpiContainer");
   const vatKpiContainerOld = document.getElementById("vatKpiContainerOld");
 
-  if (vatModeAcquisti) {
-    vatModeAcquisti.addEventListener("change", (e) => {
-      if (e.target.checked) {
-        // Mostra solo KPI acquisti (vecchia modalità)
-        if (vatKpiContainer) vatKpiContainer.style.display = "none";
-        if (vatKpiContainerOld) vatKpiContainerOld.style.display = "flex";
-        
-        // Cambia header tabella
-        const headerAcq = document.getElementById("vatHeaderAcquisti");
-        const headerComp = document.getElementById("vatHeaderCompleta");
-        if (headerAcq) headerAcq.style.display = "";
-        if (headerComp) headerComp.style.display = "none";
-        
-        renderVatTableComplete();
-      }
-    });
+  function applyVatModeUI() {
+    const modeCompleta = !!(vatModeCompleta && vatModeCompleta.checked);
+
+    // KPI
+    if (vatKpiContainer) vatKpiContainer.style.display = modeCompleta ? "flex" : "none";
+    if (vatKpiContainerOld) vatKpiContainerOld.style.display = modeCompleta ? "none" : "flex";
+
+    // Header tabella
+    const headerAcq = document.getElementById("vatHeaderAcquisti");
+    const headerComp = document.getElementById("vatHeaderCompleta");
+    if (headerAcq) headerAcq.style.display = modeCompleta ? "none" : "";
+    if (headerComp) headerComp.style.display = modeCompleta ? "" : "none";
+
+    // Render
+    if (modeCompleta) renderVatTableComplete();
+    else renderVatLiquidation();
   }
 
+  if (vatModeAcquisti) {
+    vatModeAcquisti.addEventListener("change", () => applyVatModeUI());
+  }
   if (vatModeCompleta) {
-    vatModeCompleta.addEventListener("change", (e) => {
-      if (e.target.checked) {
-        // Mostra KPI completi
-        if (vatKpiContainer) vatKpiContainer.style.display = "flex";
-        if (vatKpiContainerOld) vatKpiContainerOld.style.display = "none";
-        
-        // Cambia header tabella
-        const headerAcq = document.getElementById("vatHeaderAcquisti");
-        const headerComp = document.getElementById("vatHeaderCompleta");
-        if (headerAcq) headerAcq.style.display = "none";
-        if (headerComp) headerComp.style.display = "";
-        
-        renderVatTableComplete();
-      }
-    });
+    vatModeCompleta.addEventListener("change", () => applyVatModeUI());
   }
 
   // Listener per aggiornare la tabella quando si clicca sul TAB
   const btnVatTab = document.querySelector('.nav-tab[data-section="section-vat"]');
   if (btnVatTab) {
     btnVatTab.addEventListener("click", () => {
-      // Verifica quale modalità è attiva
-      const modeCompleta = vatModeCompleta && vatModeCompleta.checked;
-      if (modeCompleta) {
-        renderVatTableComplete();
-      } else {
-        renderVatLiquidation();
+      applyVatModeUI();
+    });
+  }
+
+  // ✅ Init: allinea UI alla radio selezionata appena si carica la pagina
+  applyVatModeUI();
+
+  // ==============================
+  // 🪟 Modal anomalie segni IVA
+  // ==============================
+  function openVatAnomModal(monthKey) {
+    const modal = document.getElementById("vatAnomModal");
+    const title = document.getElementById("vatAnomModalTitle");
+    const body = document.getElementById("vatAnomModalBody");
+    if (!modal || !title || !body) return;
+
+    const list = (lastVatSignAnomalies || []).filter(x => x.mese === monthKey);
+
+    title.textContent = `Anomalie segni - ${monthKey} (${list.length})`;
+
+    if (!list.length) {
+      body.innerHTML = `<div>Nessuna anomalia trovata per il mese selezionato.</div>`;
+    } else {
+      const rows = list.map(a => `
+        <tr>
+          <td class="mono">${(a.num || "")}</td>
+          <td>${(a.den || "")}</td>
+          <td class="mono">${(a.piva || "")}</td>
+          <td class="mono">${(a.data || "")}</td>
+          <td class="mono">${(a.tipoDoc || "")}</td>
+          <td class="mono">${formatNumberITDisplay(a.imp)}</td>
+          <td class="mono">${formatNumberITDisplay(a.iva)}</td>
+          <td class="mono">${formatNumberITDisplay(a.tot)}</td>
+        </tr>
+      `).join("");
+
+      body.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>N. Doc</th>
+              <th>Fornitore</th>
+              <th>P.IVA</th>
+              <th>Data</th>
+              <th>Tipo</th>
+              <th>Imponibile</th>
+              <th>IVA</th>
+              <th>Totale</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:10px; opacity:.85;">
+          Nota: i totali restano quelli ADE (non correggo automaticamente i segni).
+        </div>
+      `;
+    }
+
+    modal.style.display = "block";
+  }
+
+  function closeVatAnomModal() {
+    const modal = document.getElementById("vatAnomModal");
+    if (modal) modal.style.display = "none";
+  }
+
+  // Listener chiusura
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("#vatAnomModalClose");
+    if (btn) closeVatAnomModal();
+
+    // click fuori pannello = chiudi
+    const modalBackdropClicked = e.target.id === "vatAnomModal";
+    if (modalBackdropClicked) closeVatAnomModal();
+  });
+
+  // Event delegation: badge + click riga mese
+  const vatTable = document.getElementById("vatTable");
+  if (vatTable) {
+    vatTable.addEventListener("click", (e) => {
+      // 1) Click sul badge (modalità completa)
+      const badgeBtn = e.target.closest(".vat-anom-btn");
+      if (badgeBtn) {
+        const monthKey = badgeBtn.getAttribute("data-month");
+        if (monthKey) openVatAnomModal(monthKey);
+        return;
       }
+
+      // 2) Click sulla riga del mese (tbody)
+      const row = e.target.closest("tbody tr[data-month]");
+      if (!row) return;
+
+      const monthKey = row.getAttribute("data-month");
+      if (!monthKey) return;
+
+      openVatAnomModal(monthKey); // se non ci sono anomalie, la modale mostrerà "nessuna anomalia"
+    });
+  }
+
+  // Event delegation per badge anomalie nella tabella IVA acquisti
+  const vatTbody = document.getElementById("vatTbody");
+  if (vatTbody) {
+    vatTbody.addEventListener("click", (e) => {
+      const pill = e.target.closest(".vat-anom-pill");
+      if (!pill) return;
+      const monthKey = pill.getAttribute("data-month");
+      if (monthKey) openVatAnomModal(monthKey);
     });
   }
 
