@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
@@ -80,6 +80,9 @@
         </button>
         <button class="nav-tab" data-section="section-analysis">
           Analisi fornitori (ADE)
+        </button>
+        <button class="nav-tab" data-section="section-analysis-clients">
+          Analisi clienti (ADE)
         </button>
         <button class="nav-tab" data-section="section-dashboard">
           Dashboard / KPI
@@ -786,7 +789,7 @@
             </div>
           </div>
 
-          <!-- ⚠️ Warning anomalie segni (ADE) -->
+          <!-- Warning anomalie segni (ADE) -->
           <div id="vatAnomalyBanner" class="vat-anomaly-banner" style="display:none;"></div>
 
           <div class="analysis-table-card">
@@ -817,13 +820,89 @@
             </div>
 
             <div class="analysis-footer-note">
-              L’analisi utilizza solo i dati del file ADE (fatture acquisto) nel periodo selezionato.
+              L'analisi utilizza solo i dati del file ADE (fatture acquisto) nel periodo selezionato.
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- SEZIONE 2B: ANALISI CLIENTI -->
+      <div class="section" id="section-analysis-clients">
+        <div class="analysis-wrapper">
+          <div class="analysis-header">
+            <div class="analysis-title">Analisi clienti (da ADE)</div>
+            <div class="analysis-subtitle">
+              Pesa i clienti in base alle fatture presenti in ADE vendite, su un periodo di analisi selezionato.
+            </div>
+          </div>
+
+          <div class="analysis-filters">
+            <div class="analysis-period-row">
+              <span>Periodo di analisi:</span>
+              <div>
+                <label for="anClientStart">Dal</label>
+                <input type="date" id="anClientStart" />
+              </div>
+              <div>
+                <label for="anClientEnd">Al</label>
+                <input type="date" id="anClientEnd" />
+              </div>
+              <div class="analysis-period-quick">
+                <button type="button" class="pill-small" id="btnAnClientAll">Tutto ADE</button>
+                <button type="button" class="pill-small" id="btnAnClientYear">Anno corrente</button>
+                <button type="button" class="pill-small" id="btnAnClientLast12">Ultimi 12 mesi</button>
+              </div>
+            </div>
+
+            <div class="analysis-actions-row">
+              <button type="button" class="btn btn-secondary" id="btnAnClientApply">
+                Applica filtro periodo
+              </button>
+              <span id="analysisClientStatus" class="analysis-status">
+                In attesa dati ADE Vendite: carica il file nella sezione Riconciliazione Vendite.
+              </span>
+            </div>
+
+            <div class="analysis-search-row">
+              <input type="text" id="anClientSearch" placeholder="Cerca cliente o P.IVA..." />
+              <span id="analysisClientCount" class="analysis-count">Clienti nel periodo: 0</span>
+            </div>
+          </div>
+
+          <div class="analysis-table-card">
+            <div class="analysis-table-header">
+              <div>
+                <div class="table-title">Elenco clienti ADE</div>
+                <div class="table-subtitle">
+                  Ordinati per totale complessivo (imponibile + IVA) in ordine decrescente.
+                </div>
+              </div>
+            </div>
+
+            <div class="table-wrapper" id="analysisClientTableContainer" style="display:none;">
+              <table id="analysisClientTable">
+                <thead>
+                  <tr>
+                    <th style="width: 250px;">Cliente<div class="resizer"></div></th>
+                    <th style="width: 130px;">P.IVA<div class="resizer"></div></th>
+                    <th style="width: 150px;">Tot. imponibile<div class="resizer"></div></th>
+                    <th style="width: 150px;">Tot. IVA<div class="resizer"></div></th>
+                    <th style="width: 150px;">Tot. complessivo<div class="resizer"></div></th>
+                    <th style="width: 100px;">N. fatture<div class="resizer"></div></th>
+                    <th style="width: 200px;">Periodo<div class="resizer"></div></th>
+                  </tr>
+                </thead>
+                <tbody id="analysisClientTbody"></tbody>
+              </table>
+            </div>
+
+            <div class="analysis-footer-note">
+              L'analisi utilizza solo i dati del file ADE (fatture vendita) nel periodo selezionato.
             </div>
           </div>
         </div>
       </div>
 
-            <!-- SEZIONE 3: DASHBOARD / KPI -->
+      <!-- SEZIONE 3: DASHBOARD / KPI -->
 <div class="section" id="section-dashboard">
   <div class="analysis-wrapper">
     <div class="analysis-header">
@@ -1262,3 +1341,9 @@
 
 </body>
 </html>
+
+
+
+
+
+

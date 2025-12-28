@@ -1,4 +1,4 @@
-// 🚀 VERSIONE LOGIC.JS - BUILD 2025-12-10 17:30 🚀
+﻿// 🚀 VERSIONE LOGIC.JS - BUILD 2025-12-10 17:30 🚀
 console.log("🚀🚀🚀 LOGIC.JS CARICATO - BUILD 10/12/2025 17:30 🚀🚀🚀");
 console.log("✅ Fix ADE indexOf() attivo");
 console.log("✅ Fix date normalizeDateItalyStrict attivo");
@@ -657,6 +657,9 @@ window.addEventListener("DOMContentLoaded", () => {
   let analysisMinDate = null;
   let analysisMaxDate = null;
   let lastSupplierAnalysis = [];
+  let analysisClientMinDate = null;
+  let analysisClientMaxDate = null;
+  let lastClientAnalysis = [];
 
   // editor
   let currentEditRowId = null;
@@ -6170,6 +6173,17 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
   const analysisCountEl = document.getElementById("analysisCount");
   const analysisTableContainer = document.getElementById("analysisTableContainer");
   const analysisTbody = document.getElementById("analysisTbody");
+  const anClientStartInput = document.getElementById("anClientStart");
+  const anClientEndInput = document.getElementById("anClientEnd");
+  const anClientApplyBtn = document.getElementById("btnAnClientApply");
+  const anClientAllBtn = document.getElementById("btnAnClientAll");
+  const anClientYearBtn = document.getElementById("btnAnClientYear");
+  const anClientLast12Btn = document.getElementById("btnAnClientLast12");
+  const anClientSearchInput = document.getElementById("anClientSearch");
+  const analysisClientStatusEl = document.getElementById("analysisClientStatus");
+  const analysisClientCountEl = document.getElementById("analysisClientCount");
+  const analysisClientTableContainer = document.getElementById("analysisClientTableContainer");
+  const analysisClientTbody = document.getElementById("analysisClientTbody");
 
   function initAnalysisPeriodFromAde() {
     if (!lastAdeRecords || !lastAdeRecords.length) {
@@ -6295,7 +6309,7 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
       tr.appendChild(td(String(s.count), "mono"));
 
       const periodoStr = (s.minDate && s.maxDate)
-        ? `${formatDateIT(s.minDate)} – ${formatDateIT(s.maxDate)}`
+        ? `${formatDateIT(s.minDate)} - ${formatDateIT(s.maxDate)}`
         : "n/d";
       tr.appendChild(td(periodoStr, "mono"));
 
@@ -6307,6 +6321,147 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     analysisStatusEl.textContent = "Analisi calcolata sui dati ADE nel periodo selezionato.";
     
     const tableEl = document.getElementById("analysisTable");
+    if (tableEl) createResizableTable(tableEl);
+  }
+
+  // ---------- ANALISI CLIENTI (ADE VENDITE) ----------
+
+  function initClientAnalysisPeriodFromAdeSales() {
+    if (!lastAdeSalesRecords || !lastAdeSalesRecords.length) {
+      analysisClientStatusEl.textContent = "In attesa dati ADE Vendite: carica il file nella sezione Riconciliazione Vendite.";
+      return;
+    }
+    const { min, max } = getMinMaxDates(lastAdeSalesRecords);
+    if (!min || !max) {
+      analysisClientStatusEl.textContent = "Non sono riuscito a leggere le date dal file ADE Vendite.";
+      return;
+    }
+    analysisClientMinDate = min;
+    analysisClientMaxDate = max;
+    if (anClientStartInput && anClientEndInput) {
+      anClientStartInput.value = dateToInputValue(min);
+      anClientEndInput.value = dateToInputValue(max);
+    }
+    computeClientAnalysis();
+  }
+
+  function computeClientAnalysis() {
+    if (!lastAdeSalesRecords || !lastAdeSalesRecords.length) {
+      analysisClientStatusEl.textContent = "Nessun dato ADE Vendite caricato. Usa la sezione Riconciliazione Vendite per importare il file.";
+      analysisClientTableContainer.style.display = "none";
+      analysisClientCountEl.textContent = "Clienti nel periodo: 0";
+      analysisClientTbody.innerHTML = "";
+      return;
+    }
+
+    let startDate = parseInputDate(anClientStartInput.value);
+    let endDate = parseInputDate(anClientEndInput.value);
+
+    if (!startDate && analysisClientMinDate) startDate = analysisClientMinDate;
+    if (!endDate && analysisClientMaxDate) endDate = analysisClientMaxDate;
+
+    if (startDate && endDate && endDate < startDate) {
+      const tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
+      if (anClientStartInput && anClientEndInput) {
+        anClientStartInput.value = dateToInputValue(startDate);
+        anClientEndInput.value = dateToInputValue(endDate);
+      }
+    }
+
+    const clientsMap = new Map();
+
+    for (const r of lastAdeSalesRecords) {
+      if (!r.data) continue;
+      if (startDate && r.data < startDate) continue;
+      if (endDate && r.data > endDate) continue;
+
+      const key = (r.pivaDigits || "") + "|" + (r.denNorm || "");
+
+      if (!clientsMap.has(key)) {
+        clientsMap.set(key, {
+          den: r.den || "",
+          denNorm: r.denNorm || "",
+          piva: r.piva || "",
+          totImp: 0,
+          totIva: 0,
+          totTot: 0,
+          count: 0,
+          minDate: null,
+          maxDate: null
+        });
+      }
+
+      const c = clientsMap.get(key);
+      c.totImp += r.imp || 0;
+      c.totIva += r.iva || 0;
+      c.totTot += r.tot || 0;
+      c.count += 1;
+      if (!c.minDate || r.data < c.minDate) c.minDate = r.data;
+      if (!c.maxDate || r.data > c.maxDate) c.maxDate = r.data;
+    }
+
+    const arr = Array.from(clientsMap.values());
+    arr.sort((a, b) => b.totTot - a.totTot);
+
+    lastClientAnalysis = arr;
+    renderClientAnalysis();
+  }
+
+  function getFilteredClients() {
+    if (!lastClientAnalysis) return [];
+    const term = (anClientSearchInput?.value || "").trim().toUpperCase();
+    if (!term) return lastClientAnalysis;
+
+    return lastClientAnalysis.filter(c => {
+      const den = (c.denNorm || "").toUpperCase();
+      const piva = (c.piva || "").toUpperCase();
+      return den.includes(term) || piva.includes(term);
+    });
+  }
+
+  function renderClientAnalysis() {
+    const list = getFilteredClients();
+    analysisClientTbody.innerHTML = "";
+
+    if (!list.length) {
+      analysisClientTableContainer.style.display = "none";
+      analysisClientCountEl.textContent = "Clienti nel periodo: 0";
+      analysisClientStatusEl.textContent = "Nessun cliente trovato nel periodo selezionato.";
+      return;
+    }
+
+    for (const c of list) {
+      const tr = document.createElement("tr");
+
+      function td(text, extraClass) {
+        const td = document.createElement("td");
+        if (extraClass) td.className = extraClass;
+        td.textContent = text ?? "";
+        return td;
+      }
+
+      tr.appendChild(td(c.den));
+      tr.appendChild(td(c.piva, "mono"));
+      tr.appendChild(td(formatNumberITDisplay(c.totImp), "mono"));
+      tr.appendChild(td(formatNumberITDisplay(c.totIva), "mono"));
+      tr.appendChild(td(formatNumberITDisplay(c.totTot), "mono"));
+      tr.appendChild(td(String(c.count), "mono"));
+
+      const periodoStr = (c.minDate && c.maxDate)
+        ? `${formatDateIT(c.minDate)} - ${formatDateIT(c.maxDate)}`
+        : "n/d";
+      tr.appendChild(td(periodoStr, "mono"));
+
+      analysisClientTbody.appendChild(tr);
+    }
+
+    analysisClientTableContainer.style.display = "block";
+    analysisClientCountEl.textContent = `Clienti nel periodo: ${list.length}`;
+    analysisClientStatusEl.textContent = "Analisi calcolata sui dati ADE Vendite nel periodo selezionato.";
+
+    const tableEl = document.getElementById("analysisClientTable");
     if (tableEl) createResizableTable(tableEl);
   }
 
@@ -7903,6 +8058,9 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
         totalGestSalesCount = gestAll.length;
         lastAdeSalesRecords = adeSales;
         lastGestSalesRecords = gestAll;
+        if (!analysisClientMinDate || !analysisClientMaxDate) {
+          initClientAnalysisPeriodFromAdeSales();
+        }
         // Aggiorna anche lo state globale
         try {
           window.state.lastAdeSales = adeSales;
@@ -8302,12 +8460,52 @@ tr.appendChild(tdText(g ? g.tot.toFixed(2) : "", "mono"));
     renderSupplierAnalysis();
   });
 
+  // ---------- event handlers analisi clienti ----------
+
+  anClientApplyBtn.addEventListener("click", () => {
+    computeClientAnalysis();
+  });
+
+  anClientAllBtn.addEventListener("click", () => {
+    if (!analysisClientMinDate || !analysisClientMaxDate) {
+      initClientAnalysisPeriodFromAdeSales();
+      return;
+    }
+    anClientStartInput.value = dateToInputValue(analysisClientMinDate);
+    anClientEndInput.value = dateToInputValue(analysisClientMaxDate);
+    computeClientAnalysis();
+  });
+
+  anClientYearBtn.addEventListener("click", () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
+    anClientStartInput.value = dateToInputValue(start);
+    anClientEndInput.value = dateToInputValue(end);
+    computeClientAnalysis();
+  });
+
+  anClientLast12Btn.addEventListener("click", () => {
+    let end = analysisClientMaxDate || new Date();
+    let start = new Date(end.getTime());
+    start.setDate(start.getDate() - 365);
+    anClientStartInput.value = dateToInputValue(start);
+    anClientEndInput.value = dateToInputValue(end);
+    computeClientAnalysis();
+  });
+
+  anClientSearchInput.addEventListener("input", () => {
+    renderClientAnalysis();
+  });
+
   // ---------- nav tab grafica ----------
   const navTabs = Array.from(document.querySelectorAll(".nav-tab"));
   const sections = {
     "section-recon": document.getElementById("section-recon"),
     "section-sales": document.getElementById("section-sales"),
     "section-analysis": document.getElementById("section-analysis"),
+    "section-analysis-clients": document.getElementById("section-analysis-clients"),
     "section-dashboard": document.getElementById("section-dashboard"),
     "section-vat": document.getElementById("section-vat"),
   };
@@ -10025,3 +10223,6 @@ function renderPeriodKpi(results) {
   }
 
 });
+
+
+

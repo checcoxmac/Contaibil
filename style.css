@@ -72,6 +72,11 @@
   --radius-lg: 12px;
   --radius-pill: 999px;
   --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --btn-polish-bg: linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.04));
+  --btn-polish-border: rgba(255,255,255,0.28);
+  --btn-polish-shadow: 0 10px 20px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.35);
+  --btn-polish-shadow-compact: 0 6px 14px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.25);
+  --btn-polish-hover: rgba(255,255,255,0.18);
 
   /* 5. GLASSMORPHISM (LIGHT) */
   --glass-bg: rgba(248, 248, 248, 0.7);
@@ -120,6 +125,11 @@ html[data-theme="dark"] {
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-highlight: rgba(255, 255, 255, 0.1);
   --glass-shadow: rgba(0, 0, 0, 0.3);
+  --btn-polish-bg: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.02));
+  --btn-polish-border: rgba(255,255,255,0.18);
+  --btn-polish-shadow: 0 10px 20px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.12);
+  --btn-polish-shadow-compact: 0 6px 14px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.1);
+  --btn-polish-hover: rgba(255,255,255,0.12);
 }
 
 .modal-backdrop {
@@ -365,8 +375,9 @@ body {
 .nav-tab {
   padding: 7px 14px;
   border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--btn-polish-border) 60%, transparent);
+  background-color: transparent;
+  background-image: var(--btn-polish-bg);
   color: var(--sys-text-secondary);
   font-size: 0.78rem;
   cursor: pointer;
@@ -374,6 +385,7 @@ body {
   align-items: center;
   gap: 6px;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.08s ease, box-shadow 0.08s ease;
+  box-shadow: var(--btn-polish-shadow-compact);
 }
 
 .nav-tab span.nav-pill {
@@ -382,9 +394,11 @@ body {
 }
 
 .nav-tab.active {
-  background: var(--sys-tint-blue);
+  background-color: var(--sys-tint-blue);
+  background-image: var(--btn-polish-bg);
+  border-color: color-mix(in srgb, var(--sys-tint-blue) 65%, rgba(255,255,255,0.2));
   color: var(--sys-text-inverted);
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+  box-shadow: 0 8px 18px rgba(0, 122, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.35);
   transform: translateY(-1px);
 }
 
@@ -645,8 +659,10 @@ input[type="file"] {
 }
 
 input[type="file"]::file-selector-button {
-  background: var(--sys-tint-blue);
-  border: none;
+  background-color: var(--sys-tint-blue);
+  background-image: var(--btn-polish-bg);
+  border: 1px solid color-mix(in srgb, var(--sys-tint-blue) 65%, rgba(255,255,255,0.2));
+  box-shadow: var(--btn-polish-shadow-compact);
   color: var(--sys-text-inverted);
   padding: 5px 10px;
   border-radius: 999px;
@@ -686,19 +702,23 @@ input[type="file"]:hover::file-selector-button {
   gap: 6px;
   padding: 9px 16px;
   border-radius: var(--radius-pill);
-  border: none;
+  border: 1px solid var(--btn-border, var(--btn-polish-border));
   cursor: pointer;
   font-weight: 600;
   font-size: 0.82rem;
   letter-spacing: 0.01em;
   transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease, opacity 0.12s ease;
   white-space: nowrap;
+  background-color: var(--btn-bg, var(--sys-bg-content-alt));
+  background-image: var(--btn-polish-bg);
+  box-shadow: var(--btn-shadow, var(--btn-polish-shadow));
 }
 
 .btn-primary {
-  background: var(--sys-tint-blue);
+  --btn-bg: var(--sys-tint-blue);
+  --btn-border: color-mix(in srgb, var(--sys-tint-blue) 65%, rgba(255,255,255,0.2));
+  --btn-shadow: 0 10px 22px rgba(0, 122, 255, 0.32), inset 0 1px 0 rgba(255,255,255,0.35);
   color: var(--sys-text-inverted);
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
 }
 
 .btn-primary:disabled {
@@ -708,21 +728,26 @@ input[type="file"]:hover::file-selector-button {
 }
 
 .btn-secondary {
-  background: var(--sys-bg-content-alt);
+  --btn-bg: var(--sys-bg-content-alt);
+  --btn-border: var(--sys-separator);
+  --btn-shadow: var(--btn-polish-shadow);
   color: var(--sys-text-primary);
-  border: 1px solid var(--sys-separator);
 }
 
 .btn-tertiary {
-  background: transparent;
+  --btn-bg: transparent;
+  --btn-border: var(--sys-separator);
+  --btn-shadow: none;
+  background-image: none;
   color: var(--sys-text-secondary);
-  border: 1px dashed var(--sys-separator);
+  border-style: dashed;
   padding-inline: 10px;
 }
 
 .btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--btn-shadow, var(--shadow-soft));
+  filter: brightness(1.02);
 }
 
 .btn:active:not(:disabled) {
@@ -796,14 +821,17 @@ input[type="file"]:hover::file-selector-button {
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   font-size: 0.72rem;
-  border: 1px solid var(--sys-separator);
-  background: var(--sys-bg-content-alt);
+  border: 1px solid var(--btn-polish-border);
+  background-color: var(--sys-bg-content-alt);
+  background-image: var(--btn-polish-bg);
+  box-shadow: var(--btn-polish-shadow-compact);
   color: var(--sys-text-secondary);
   cursor: pointer;
 }
 
 .filter-btn.active {
-  background: var(--sys-tint-blue);
+  background-color: var(--sys-tint-blue);
+  background-image: var(--btn-polish-bg);
   border-color: var(--sys-tint-blue);
   color: var(--sys-text-inverted);
 }
@@ -1035,14 +1063,15 @@ tr.match-source-row td {
 }
 
 .row-delete-btn {
-  border: none;
-  background: var(--pill-ade-bg);
+  background-color: var(--pill-ade-bg);
+  background-image: var(--btn-polish-bg);
   border-radius: 999px;
   padding: 3px 6px;
   cursor: pointer;
   font-size: 0.8rem;
   color: var(--sys-tint-red);
-  border: 1px solid;
+  border: 1px solid var(--sys-tint-red);
+  box-shadow: var(--btn-polish-shadow-compact);
 }
 
 .row-delete-btn:hover {
@@ -1131,8 +1160,10 @@ tr.match-source-row td {
 .pill-small {
   padding: 3px 8px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--sys-separator);
-  background: var(--sys-bg-content);
+  border: 1px solid var(--btn-polish-border);
+  background-color: var(--sys-bg-content);
+  background-image: var(--btn-polish-bg);
+  box-shadow: var(--btn-polish-shadow-compact);
   color: var(--sys-text-secondary);
   cursor: pointer;
   font-size: 0.72rem;
@@ -1316,8 +1347,9 @@ tr.match-source-row td {
 }
 
 .edit-close-btn {
-  border: none;
-  background: var(--sys-bg-content-alt);
+  border: 1px solid var(--btn-polish-border);
+  background-color: var(--sys-bg-content-alt);
+  background-image: var(--btn-polish-bg);
   border-radius: 999px;
   width: 26px;
   height: 26px;
@@ -1327,10 +1359,13 @@ tr.match-source-row td {
   color: var(--sys-text-secondary);
   cursor: pointer;
   font-size: 0.8rem;
+  box-shadow: var(--btn-polish-shadow-compact);
 }
 
 .edit-close-btn:hover {
-  background: var(--sys-tint-blue);
+  background-color: var(--sys-tint-blue);
+  background-image: var(--btn-polish-bg);
+  border-color: color-mix(in srgb, var(--sys-tint-blue) 65%, rgba(255,255,255,0.2));
   color: var(--sys-text-inverted);
 }
 
@@ -1439,8 +1474,9 @@ button[disabled][data-disabled-reason]:hover::after {
   box-shadow: 0 4px 10px rgba(0,0,0,0.25);
 }
 .btn-danger {
-  background: var(--pill-ade-bg);
-  border: 1px solid var(--sys-tint-red);
+  --btn-bg: var(--pill-ade-bg);
+  --btn-border: var(--sys-tint-red);
+  --btn-shadow: var(--btn-polish-shadow);
   color: var(--sys-tint-red);
 }
 
@@ -2177,15 +2213,16 @@ details.learning-card {
 }
 
 .btn-highlight {
-  background-color: var(--sys-tint-blue) !important;
-  color: #fff !important;
-  border: none !important;
-  font-weight: 700 !important;
-  box-shadow: 0 2px 5px rgba(0, 122, 255, 0.3);
+  --btn-bg: var(--sys-tint-blue);
+  --btn-border: color-mix(in srgb, var(--sys-tint-blue) 70%, rgba(255,255,255,0.2));
+  --btn-shadow: 0 8px 18px rgba(0, 122, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.35);
+  color: #fff;
+  font-weight: 700;
 }
 .btn-highlight:disabled {
-  background-color: #ccc !important;
-  box-shadow: none;
+  --btn-bg: #ccc;
+  --btn-border: #ccc;
+  --btn-shadow: none;
 }
 
 .vr-separator {
@@ -2224,8 +2261,9 @@ body.wide-mode .table-container {
 
 /* Bottone wide-mode nel topbar */
 .btn-topbar-icon {
-  background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
-  border: 1px solid rgba(255,255,255,0.28);
+  background-color: transparent;
+  background-image: var(--btn-polish-bg);
+  border: 1px solid var(--btn-polish-border);
   color: var(--sys-text-primary);
   font-size: 1.05rem;
   cursor: pointer;
@@ -2236,18 +2274,20 @@ body.wide-mode .table-container {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  box-shadow: 0 10px 20px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.35);
+  box-shadow: var(--btn-polish-shadow);
 }
 
 .btn-topbar-icon:hover {
-  background-color: rgba(255,255,255,0.18);
+  background-color: var(--btn-polish-hover);
   transform: translateY(-1px);
 }
 
 .btn-topbar-icon.active {
   color: var(--sys-tint-blue);
-  background: linear-gradient(135deg, rgba(59,130,246,0.16), rgba(37,99,235,0.26));
-  box-shadow: 0 12px 24px rgba(37,99,235,0.18);
+  background-color: color-mix(in srgb, var(--sys-tint-blue) 28%, transparent);
+  background-image: var(--btn-polish-bg);
+  border-color: color-mix(in srgb, var(--sys-tint-blue) 65%, rgba(255,255,255,0.2));
+  box-shadow: 0 12px 24px rgba(37,99,235,0.18), inset 0 1px 0 rgba(255,255,255,0.35);
 }
 
 /* --- LOADING OVERLAY --- */
@@ -2826,6 +2866,12 @@ tr.vat-closed {
 /* piccolo shadow per "stacco" mentre scrolli */
 .table-wrapper table thead th {
   box-shadow: 0 6px 12px rgba(0,0,0,0.25);
+}
+
+/* VAT table has a single visible header row at a time: keep it flush to the top */
+#vatTable thead tr:first-child th,
+#vatTable thead tr:nth-child(2) th {
+  top: 0;
 }
 
 /* ===========================
